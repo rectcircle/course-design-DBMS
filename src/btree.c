@@ -93,7 +93,7 @@ void freeBTreeNode(BTree *config, BTreeNode* node, int8 isLeaf){
 /*****************************************************************************
  * makeBTree的实现
  ******************************************************************************/
-BTree *makeBTree(uint32 degree, uint32 keyLen, uint32 valueLen){
+BTree *makeBTree(uint32 degree, uint32 keyLen, uint32 valueLen, int8 isUnique){
 	//度小于3将会退化为链表，不允许创建
 	if(degree<3) return NULL;
 	BTree *config = (BTree *)malloc(sizeof(BTree));
@@ -101,6 +101,7 @@ BTree *makeBTree(uint32 degree, uint32 keyLen, uint32 valueLen){
 	config->degree = degree;
 	config->keyLen = keyLen;
 	config->valueLen = valueLen;
+	config->isUnique = isUnique;
 	BTreeNode* root = makeBTreeNode(config, 0, 1);
 	config->root = root;
 	config->sqt = root;
@@ -110,7 +111,7 @@ BTree *makeBTree(uint32 degree, uint32 keyLen, uint32 valueLen){
 /*****************************************************************************
  * searchBTree的实现
  ******************************************************************************/
-uint8 *searchBTree(BTree *config, uint8 *key){
+uint8 *searchBTree(BTree *config, uint8 *key, BTreeNode** outNode, int32* outIndex){
 	BTreeNode* root = config->root;
 	int32 level = 1;
 	while(level<config->depth){ //一直查找到叶子节点
@@ -126,6 +127,10 @@ uint8 *searchBTree(BTree *config, uint8 *key){
 		return NULL;
 	}
 	if(0==byteArrayCompare(config->keyLen, root->keys[idx] , key)){
+		if(outNode!=NULL && outIndex!=NULL){
+			*outNode = root;
+			*outIndex = idx;
+		}
 		return root->values[idx];
 	}
 	return NULL;
@@ -199,7 +204,7 @@ static BTreeNode* insertTo(BTree *config, BTreeNode* now, uint8 *key, uint8 *val
 
 int32 insertBTree(BTree *config, uint8 *key, uint8 *value){
 	//违反唯一约束
-	if(config->isUnique && searchBTree(config, key)!=NULL){ 
+	if(config->isUnique && searchBTree(config, key, NULL, NULL)!=NULL){ 
 		return -1;
 	}
 	BTreeNode *newChild = insertTo(config, config->root, key, value, 1);
@@ -213,14 +218,16 @@ int32 insertBTree(BTree *config, uint8 *key, uint8 *value){
 		config->root = newRoot;
 		config->depth++;
 	}
-	return 0;
+	return 1;
 }
 
 /*****************************************************************************
  * removeBTree的实现
  ******************************************************************************/
 
-//根据现有节点和index、index+1号孩子进行合并，使孩子节点满足B+树的性质
+/**
+ * 根据现有节点和index、index+1号孩子进行合并，使孩子节点满足B+树的性质
+ */
 static void *mergeBTreeNode(BTree *config, BTreeNode *nowNode, int32 index, int8 isLeaf){
 	BTreeNode *idxNode = nowNode->children[index];
 	BTreeNode *idx1Node = nowNode->children[index + 1];
@@ -242,7 +249,9 @@ static void *mergeBTreeNode(BTree *config, BTreeNode *nowNode, int32 index, int8
 	freeBTreeNode(config,idx1Node,isLeaf);
 }
 
-//均衡一下index和index+1号孩子的节点数，使树满足B+数的性质
+/**
+ * 均衡一下index和index+1号孩子的节点数，使树满足B+数的性质
+ */
 static void balanceBTreeNode(BTree *config, BTreeNode *nowNode, int32 index, int8 isLeaf){
 	BTreeNode* idxNode = nowNode->children[index];
 	BTreeNode *idx1Node = nowNode->children[index+1];
@@ -283,54 +292,118 @@ static void balanceBTreeNode(BTree *config, BTreeNode *nowNode, int32 index, int
 	nowNode->keys[index + 1] = idx1Node->keys[0];
 }
 
-static void removeFrom(BTree* config, BTreeNode* now, uint8 *key, int32 level){
-	int32 index = binarySearch(now, key, config->keyLen);
-	//是叶子节点
-	if (level == config->depth){
-		//找不到该元素
-		if(index==-1||byteArrayCompare(config->keyLen, now->keys[index], key)!=0){
-			return;
+/**
+ * 递归删除一个节点
+ * @return 0 表示没有数据被选中删除； 其他表示被删除的数目
+ */
+static int32 removeFrom(BTree* config, BTreeNode* now, uint8 *key, uint8 *value, int32 level){
+	int32 removeCnt=0;
+	for(int32 index = binarySearch(now, key, config->keyLen); index<now->size; index++){
+		//不存在该节点直接返回
+		if (index == -1) return removeCnt;
+		//是叶子节点
+		if (level == config->depth){
+			//非根节点的叶子节点不能删光了，要留一个
+			//删空的话，回溯不好处理
+			if(config->depth>1 && now->size<=1){
+				return removeCnt;
+			}
+			//找不到该元素
+			if(byteArrayCompare(config->keyLen, now->keys[index], key)!=0){
+				return removeCnt;
+			}
+			//存在value只删除kv严格相等的数据
+			if(value!=NULL && byteArrayCompare(config->valueLen, now->values[index], value)!=0){
+				continue;
+			}
+			//释放数据和key占用的内存
+			free(now->keys[index]);
+			free(now->values[index]);
+			deleteFromArray((void**)now->keys, now->size, index);
+			deleteFromArray((void **)now->values, now->size, index);
+			now->size--;
+			removeCnt++;
+			continue;
 		}
-		//释放数据和key占用的内存
-		free(now->keys[index]);
-		free(now->values[index]);
-		deleteFromArray((void**)now->keys, now->size, index);
-		deleteFromArray((void **)now->values, now->size, index);
-		now->size--;
-		return;
-	}
-	//非叶子节点
-	if(index==-1) return; //不存在该节点直接返回（因为小于最小值）
+		//非叶子节点
+		if(byteArrayCompare(config->keyLen, key, now->keys[index])<0){
+			// key < keys[index] 说明 key对应数据不在index这个孩子下，直接返回
+			return removeCnt;
+		}
+		BTreeNode *next = now->children[index];
+		removeCnt += removeFrom(config, next, key, value,level + 1);
+		//更新当前节点指向next的key
+		now->keys[index] = next->keys[0];
 
-	BTreeNode *next = now->children[index];
-	removeFrom(config, next, key, level+1);
-	//更新当前节点指向next的key
-	now->keys[index] = next->keys[0];
-
-	//任然满足B+树的定义
-	if (next->size>=(config->degree+1)/2){
-		return;
+		//任然满足B+树的定义
+		if (next->size>=(config->degree+1)/2){
+			continue;
+		}
+		int32 idxBak = index;
+		//不满足树的定义
+		if (index>0){
+			index--;
+		}
+		//相邻的两个孩子匀一匀可以满足B+树定义
+		if((now->children[index]->size+now->children[index+1]->size)>=config->degree+1){
+			balanceBTreeNode(config, now, index, level+1==config->depth);
+			//说明根now->size没有发生变化，要恢复index
+			index = idxBak;
+			continue;
+		}
+		//相邻的两个孩子不满足B+树定义：合并两个节点
+		mergeBTreeNode(config, now, index, level+1==config->depth);
+		//当前节点已经不满足树的定义了，不能再删了，直接返回
+		if(now->size<(config->degree+1)/2){
+			return removeCnt;
+		}
+		//此时now->size发生了变化所有index要先-1，以抵消for中++的影响
+		index = idxBak-1;
 	}
-	//不满足树的定义
-	if (index>0){
-		index--;
-	}
-	//相邻的两个孩子匀一匀可以满足B+树定义
-	if((now->children[index]->size+now->children[index+1]->size)>=config->degree+1){
-		balanceBTreeNode(config, now, index, level+1==config->depth);
-		return;
-	}
-	//相邻的两个孩子不满足B+树定义：合并两个节点
-	mergeBTreeNode(config, now, index, level+1==config->depth);
-	return;
+	return removeCnt;
 }
 
-void removeBTree(BTree *config, uint8 *key){
-	removeFrom(config, config->root, key, 1);
-	if(config->root->size==1 && config->depth>1){
-		BTreeNode* tmp = config->root;
-		config->root = config->root->children[0];
-		freeBTreeNode(config, tmp, 0);
-		config->depth--;
+int32 removeBTree(BTree *config, uint8 *key, uint8 *value){
+	int32 removeCnt = 0;
+	for(;;){
+		int32 cnt = removeFrom(config, config->root, key, value, 1);
+		removeCnt += cnt;
+		if(cnt==0){
+			return removeCnt;
+		}
+		if(config->root->size==1 && config->depth>1){
+			BTreeNode* tmp = config->root;
+			config->root = config->root->children[0];
+			freeBTreeNode(config, tmp, 0);
+			config->depth--;
+		}
+	}
+}
+
+/*****************************************************************************
+ * updateBTree的实现
+ ******************************************************************************/
+int32 updateBTree(BTree *config, uint8 *key, uint8 *oldValue, uint8 *newValue){
+	BTreeNode *outNode;
+	int32 outIndex;
+	uint8 *value;
+	value = searchBTree(config, key, &outNode, &outIndex);
+	if(value==NULL){
+		return 0;
+	}
+	int i = outIndex;
+	while (outNode!=NULL){
+		for(; i<outNode->size; i++){
+			if(byteArrayCompare(config->keyLen,outNode->keys[i],key)!=0){
+				return 0;
+			}
+			if(byteArrayCompare(config->valueLen, outNode->values[i], oldValue)==0){
+				free(outNode->values[i]);
+				outNode->values[i] = newValue;
+				return 1;
+			}
+		}
+		i = 0;
+		outNode = outNode->next;
 	}
 }

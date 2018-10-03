@@ -34,7 +34,7 @@ typedef struct BTree
 	/** 目前树的深度 */
 	uint32 depth;
 	/** 是否唯一，是否允许出现重复的键 */
-	int32 isUnique;
+	int8 isUnique;
 	/** B+树的根节点 */
 	struct BTreeNode *root;
 	/** 最小的叶子节点，用于遍历 */
@@ -99,32 +99,49 @@ void freeBTreeNode(BTree *config, BTreeNode* node, int8 isLeaf);
  * @param pageId 当前节点在磁盘中的块号
  * @param keyLen key的字节数
  * @param valueLen value的字节数
+ * @param isUnique 是否允许重复
  * @return {BTree*} 一颗可用的B+树
  */
-BTree* makeBTree(uint32 degree, uint32 keyLen, uint32 valueLen);
+BTree *makeBTree(uint32 degree, uint32 keyLen, uint32 valueLen, int8 isUnique);
 
 /**
- * 从B+Tree中查找key对应的value
+ * 从B+Tree中查找key对应的value，支持通过传出参数获取多个列表
  * @param config 合法的B+树
  * @param key 要查找的key
- * @return {uint8*} 一个字节数组指针，长度为config->valueLen
+ * @param outNode 传出参数，不为NULL时，储存第一个value所在的BTreeNode
+ * @param outIndex 传出参数，不为NULL时，储存第一个value所在的BTreeNode的下标
+ * @return {uint8*} 第一个与key相等的value，一个字节数组指针，长度为config->valueLen
  */
-uint8 *searchBTree(BTree *config, uint8 *key);
+uint8 *searchBTree(BTree *config, uint8 *key, BTreeNode **outNode, int32 *outIndex);
 
 /**
  * 向BTree添加添加一条记录
+ * 注意：不会进行重复判断，直接插入
+ * 若想抱枕KV严格不重复（同一对KV在树中唯一），请先使用update，若返回0再进行插入
  * @param config 合法的B+树
  * @param key 要插入的key
  * @param value 要插入的value
- * @return {int32} 0 插入成功，-1 插入失败
+ * @return {int32} -1 插入失败，1 表示插入成功
  */
 int32 insertBTree(BTree *config, uint8 *key, uint8 *value);
 
 /**
- * 从BTree中删除一条记录
+ * 从BTree中删除记录
  * @param config 合法的B+树
  * @param key 要删除的key
+ * @param value 要删除的value可为NULL，为NULL表示删除所有满足key的记录
+ * @return {int32} 表示删除的记录数目
  */
-void removeBTree(BTree *config, uint8 *key);
+int32 removeBTree(BTree *config, uint8 *key, uint8 *value);
+
+/**
+ * 更新KV严格相等的valeu为newValue
+ * @param config 合法的B+树
+ * @param key 要更新的key
+ * @param oldValue 要更新的之前的value
+ * @param newValue 新的value
+ * @return {int32} 0 没有选中的数据，1 更新成功
+ */
+int32 updateBTree(BTree *config, uint8 *key, uint8 *oldValue, uint8 *newValue);
 
 #endif
