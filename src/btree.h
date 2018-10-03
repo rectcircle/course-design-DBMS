@@ -34,7 +34,7 @@ typedef struct BTreeNode
 	//已经被使用的key的数目
 	uint32 size;
 	//指向孩子的指针数组
-	//数组的长度为：BTree.degree
+	//数组的长度为：BTree.degree+1
 	//为null表示为叶子节点
 	struct BTreeNode **children;
 	//若是叶子节点则不为null，指向下一个相邻的叶子节点
@@ -50,7 +50,7 @@ uint8 *searchBTree(BTree *config, uint8 *key);
 //向BTree添加添加一条记录
 int32 insertBTree(BTree *config, uint8 *key, uint8 *value);
 //向BTree中删除一条记录
-int32 deleteBTree(BTree *config, uint8 *key);
+int32 removeBTree(BTree *config, uint8 *key);
 
 //简单的宏函数
 #endif
