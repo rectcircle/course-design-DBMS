@@ -1,71 +1,34 @@
+/*****************************************************************************
+ * Copyright (c) 2018, rectcircle. All rights reserved.
+ * 
+ * @filename: btree.h
+ * @description: 定义B+数内存版的实现，该代码用于探索B+树的原理
+ * @author: Rectcircle
+ * @version: 1.0
+ * @date: 2018-09-25
+ ******************************************************************************/
+
 #include "btree.h"
 #include <malloc.h>
 #include <string.h>
 
-//创建一个可用节点
-BTreeNode *makeBTreeNode(BTree *config, uint64 pageId, int8 isLeaf){
-	//分配内存
-	BTreeNode *node = (BTreeNode *)malloc(sizeof(BTreeNode));
-	//初始化页面号
-	node->pageId=pageId;
-	//初始化keys
-	node->keys = (uint8 **)malloc(sizeof(uint8*) * (config->degree+1));
-	//初始化值和孩子节点
-	if(isLeaf){ //如果是叶子节点
-		node->values = (uint8 **)malloc(sizeof(uint8*) * (config->degree+1));
-		node->children = NULL;
-	} else { //如果不是叶子节点
-		node->values = NULL;
-		node->children = (BTreeNode **)malloc(sizeof(BTreeNode *) * (config->degree+1));
-	}
-	node->size = 0;
-	node->next = NULL;
-	return node;
-}
+/*****************************************************************************
+ * 通用私有辅助函数
+ ******************************************************************************/
 
-
-void freeBTreeNode(BTree *config, BTreeNode* node, int8 isLeaf){
-	free(node->keys);
-	if(isLeaf){ //如果是叶子节点
-		free(node->values);
-	} else { //如果不是叶子节点
-		free(node->children);
-	}
-	free(node);
-}
-
-
-//创建一个B+树，并创建根节点
-BTree *makeBTree(uint32 degree, uint32 keyLen, uint32 valueLen){
-	//度小于3将会退化为链表，不允许创建
-	if(degree<3) return NULL;
-	BTree *config = (BTree *)malloc(sizeof(BTree));
-	config->depth = 1;
-	config->degree = degree;
-	config->keyLen = keyLen;
-	config->valueLen = valueLen;
-	BTreeNode* root = makeBTreeNode(config, 0, 1);
-	config->root = root;
-	config->sqt = root;
-	return config;
-}
-
-//字节数组比较
-//返回 <0 a<b; =0 a=b; >0 a>b
-static int32 byteArrayCompare(uint32 len, uint8* a, uint8* b){
-	for(uint32 i=0; i<len; i++){
-		if(a[i]!=b[i]){
-			return a[i]-b[i];
-		}
-	}
-	return 0;
-}
-
-//二分查找，确定其索引
-//从数组中找到小于等于key的第一个元素的下标，若不存在返回-1
-//例如 5 5 7 9
-//input   1  2 5 6 7 8 9 10
-//output -1 -1 0 1 2 2 3 3
+/**
+ * 针对B+树的一个节点的keys做二分查找
+ * 找到小于等于key的第一个元素的下标，若不存在返回-1
+ * 
+ * 例如： root->keys = {5, 5, 7, 9}
+ * key分别为     1  2 5 6 7 8 9 10
+ * 则返回值分别为 -1 -1 0 1 2 2 3 3
+ * 
+ * @param root   B+树的一个节点
+ * @param key    待查找的key字节数组的指针
+ * @param keyLen 带查找的key字节数组的长度
+ * @return root->keys中第一个小于等于key的元素下标，若不存在返回-1
+ */
 static int32 binarySearch(BTreeNode* root, uint8* key, uint32 keyLen){
 	if(root->size==0){
 		return -1;
@@ -90,7 +53,63 @@ static int32 binarySearch(BTreeNode* root, uint8* key, uint32 keyLen){
 	return left;
 }
 
-//从BTree中查找一条记录
+
+/*****************************************************************************
+ * makeBTreeNode的实现
+ ******************************************************************************/
+BTreeNode *makeBTreeNode(BTree *config, uint64 pageId, int8 isLeaf){
+	//分配内存
+	BTreeNode *node = (BTreeNode *)malloc(sizeof(BTreeNode));
+	//初始化页面号
+	node->pageId=pageId;
+	//初始化keys
+	node->keys = (uint8 **)malloc(sizeof(uint8*) * (config->degree+1));
+	//初始化值和孩子节点
+	if(isLeaf){ //如果是叶子节点
+		node->values = (uint8 **)malloc(sizeof(uint8*) * (config->degree+1));
+		node->children = NULL;
+	} else { //如果不是叶子节点
+		node->values = NULL;
+		node->children = (BTreeNode **)malloc(sizeof(BTreeNode *) * (config->degree+1));
+	}
+	node->size = 0;
+	node->next = NULL;
+	return node;
+}
+
+/*****************************************************************************
+ * freeBTreeNode的实现
+ ******************************************************************************/
+void freeBTreeNode(BTree *config, BTreeNode* node, int8 isLeaf){
+	free(node->keys);
+	if(isLeaf){ //如果是叶子节点
+		free(node->values);
+	} else { //如果不是叶子节点
+		free(node->children);
+	}
+	free(node);
+}
+
+/*****************************************************************************
+ * makeBTree的实现
+ ******************************************************************************/
+BTree *makeBTree(uint32 degree, uint32 keyLen, uint32 valueLen){
+	//度小于3将会退化为链表，不允许创建
+	if(degree<3) return NULL;
+	BTree *config = (BTree *)malloc(sizeof(BTree));
+	config->depth = 1;
+	config->degree = degree;
+	config->keyLen = keyLen;
+	config->valueLen = valueLen;
+	BTreeNode* root = makeBTreeNode(config, 0, 1);
+	config->root = root;
+	config->sqt = root;
+	return config;
+}
+
+/*****************************************************************************
+ * searchBTree的实现
+ ******************************************************************************/
 uint8 *searchBTree(BTree *config, uint8 *key){
 	BTreeNode* root = config->root;
 	int32 level = 1;
@@ -112,53 +131,13 @@ uint8 *searchBTree(BTree *config, uint8 *key){
 	return NULL;
 }
 
-//从将数组src中的前srcLen个元素插入到dest的index位置
-static int32 batchInsertToArray(void** destArray, uint32 distLen, uint32 index, void** srcArray, uint32 srcLen){
-	if(index<0 || index+srcLen-1>=distLen){
-		return -1;
-	}
-	//搬移目标数组元素
-	for(int32 i=distLen-1; i>=index+srcLen; i--){
-		destArray[i] = destArray[i - srcLen];
-	}
-	//拷贝
-	memcpy(destArray+index, srcArray, sizeof(void *)* srcLen);
-	return 0;
-}
+/*****************************************************************************
+ * insertBTree的实现
+ ******************************************************************************/
 
-//在数组array的第index位置插入一个元素
-//0表示成功；-1表示无法插入
-static int32 insertToArray(void** array, uint32 len, uint32 index, void* value){
-	// if(index<0 || index>=len){
-	// 	return -1;
-	// }
-	// for(int32 i=len-1; i>index; i--){
-	// 	array[i]=array[i-1];
-	// }
-	// array[index] = value;
-	// return 0;
-	return batchInsertToArray(array,len,index,&value,1);
-}
-
-//从数组array删除第index位置开始的delLen个元素
-//0表示成功；-1表示无法删除
-static int32 batchDeleteFromArray(void** array, uint32 len, uint32 index, uint32 delLen){
-	if(index<0 || index>=len){
-		return -1;
-	}
-	for(int32 i=index; i<len-delLen; i++){
-		array[i]=array[i+delLen];
-	}
-	return 0;
-}
-
-//从数组array删除第index位置的元素
-//0表示成功；-1表示无法删除
-static int32 deleteFromArray(void** array, uint32 len, uint32 index){
-	return batchDeleteFromArray(array, len, index, 1);
-}
-
-//将现有节点分裂成两个节点，返回新创建的节点
+/**
+ * 将现有节点分裂成两个节点，返回新创建的节点，平均分配
+ */
 static BTreeNode *splitBTreeNode(BTree *config, BTreeNode *nowNode, int8 isLeaf){
 	BTreeNode *newNode = makeBTreeNode(config, 0, isLeaf);
 	int len = nowNode->size / 2; //此时size == degree+1
@@ -176,7 +155,9 @@ static BTreeNode *splitBTreeNode(BTree *config, BTreeNode *nowNode, int8 isLeaf)
 	return newNode;
 }
 
-//递归进行插入及树重建
+/** 
+ * 递归进行插入及树重建
+ */
 static BTreeNode* insertTo(BTree *config, BTreeNode* now, uint8 *key, uint8 *value, int32 level){
 	int32 index = binarySearch(now, key, config->keyLen);
 	//是叶子节点
@@ -216,8 +197,6 @@ static BTreeNode* insertTo(BTree *config, BTreeNode* now, uint8 *key, uint8 *val
 	return newNode;
 }
 
-//向BTree添加添加一条记录
-//返回0 插入成功，返回其他表示插入失败
 int32 insertBTree(BTree *config, uint8 *key, uint8 *value){
 	//违反唯一约束
 	if(config->isUnique && searchBTree(config, key)!=NULL){ 
@@ -236,6 +215,10 @@ int32 insertBTree(BTree *config, uint8 *key, uint8 *value){
 	}
 	return 0;
 }
+
+/*****************************************************************************
+ * removeBTree的实现
+ ******************************************************************************/
 
 //根据现有节点和index、index+1号孩子进行合并，使孩子节点满足B+树的性质
 static void *mergeBTreeNode(BTree *config, BTreeNode *nowNode, int32 index, int8 isLeaf){
@@ -342,8 +325,7 @@ static void removeFrom(BTree* config, BTreeNode* now, uint8 *key, int32 level){
 	return;
 }
 
-int32 removeBTree(BTree *config, uint8 *key){
-	//TODO to finish
+void removeBTree(BTree *config, uint8 *key){
 	removeFrom(config, config->root, key, 1);
 	if(config->root->size==1 && config->depth>1){
 		BTreeNode* tmp = config->root;
@@ -352,26 +334,3 @@ int32 removeBTree(BTree *config, uint8 *key){
 		config->depth--;
 	}
 }
-
-// //二分查找测试
-// #include <stdio.h>
-// int main(int argc, char const *argv[])
-// {
-// 	BTree *config = makeBTree(5, 1, 1);
-// 	for(int i=0; i<4; i++){
-// 		config->root->keys[i] = (uint8 *)malloc(sizeof(uint8));
-// 	}
-// 	config->root->keys[0][0] = 5;
-// 	config->root->keys[1][0] = 5;
-// 	config->root->keys[2][0] = 7;
-// 	config->root->keys[3][0] = 9;
-// 	config->root->size = 4;
-
-// 	uint8 key=8;
-// 	printf("%d\n", binarySearch(config->root, &key, config->keyLen));
-// 	for(uint8 key=0; key<=10; key++){
-// 		printf("key=%d; index=%d\n",key, binarySearch(config->root, &key, config->keyLen));
-// 	}
-
-// 	return 0;
-// }

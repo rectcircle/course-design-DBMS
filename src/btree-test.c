@@ -2,6 +2,27 @@
 #include <malloc.h>
 #include <string.h>
 
+// 为了方便测试，直接引入.c文件
+#include "btree.c"
+
+//=========test binarySearch=========
+void testBinarySearch(){
+	BTree *config = makeBTree(5, 1, 1);
+	for(int i=0; i<4; i++){
+		config->root->keys[i] = (uint8 *)malloc(sizeof(uint8));
+	}
+	config->root->keys[0][0] = 5;
+	config->root->keys[1][0] = 5;
+	config->root->keys[2][0] = 7;
+	config->root->keys[3][0] = 9;
+	config->root->size = 4;
+
+	uint8 key=8;
+	printf("%d\n", binarySearch(config->root, &key, config->keyLen));
+	for(uint8 key=0; key<=10; key++){
+		printf("key=%d; index=%d\n",key, binarySearch(config->root, &key, config->keyLen));
+	}
+}
 
 //=========test searchBTree=========
 void testSearchBTree(){
@@ -143,6 +164,8 @@ void testRemoveBTree(){
 #include <stdio.h>
 int main(int argc, char const *argv[])
 {
+	printf("=========test binarySearch=========");
+	testBinarySearch();
 	printf("=========test searchBTree=========\n");
 	testSearchBTree();
 	printf("=========test insertBTree (1)=========\n");
