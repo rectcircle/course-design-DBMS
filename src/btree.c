@@ -228,7 +228,7 @@ int32 insertBTree(BTree *config, uint8 *key, uint8 *value){
 /**
  * 根据现有节点和index、index+1号孩子进行合并，使孩子节点满足B+树的性质
  */
-static void *mergeBTreeNode(BTree *config, BTreeNode *nowNode, int32 index, int8 isLeaf){
+static void mergeBTreeNode(BTree *config, BTreeNode *nowNode, int32 index, int8 isLeaf){
 	BTreeNode *idxNode = nowNode->children[index];
 	BTreeNode *idx1Node = nowNode->children[index + 1];
 	uint32 idxLen = idxNode->size;
@@ -406,4 +406,5 @@ int32 updateBTree(BTree *config, uint8 *key, uint8 *oldValue, uint8 *newValue){
 		i = 0;
 		outNode = outNode->next;
 	}
+	return 0;
 }

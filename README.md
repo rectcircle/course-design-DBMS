@@ -27,6 +27,8 @@
   * [x] 2018-10-03 考虑是否使用有类型的KEY：不需要，交由上层处理
   * [x] 2018-10-03 修复小端模式下异常（统一使用大端模式储存、通过宏或hton）：交由上层处理
   * [x] 2018-10-04 完善文档、图示等内容
+* [x] 2018-10-05 编写Makefile
+* [x] 2018-10-05 优化项目目录结构
 * [ ] 实现一个通用LRU缓存
   * [ ] 实现HashMap
   * [ ] 实现双向链表
@@ -36,3 +38,52 @@
     * 大小端问题
     * 有符号无符号整形类型存储问题
 * [ ] 存储引擎实现提交日志相关设计
+
+## 目录结构
+
+```tree
+.
+├── doc
+├── include
+├── LICENSE
+├── Makefile
+├── make.sh
+├── out
+│   ├── bin
+│   ├── obj
+│   │   ├── debug
+│   │   └── release
+│   └── test
+├── README.md
+└── src
+    ├── main
+    └── test
+```
+
+* doc 文档
+* include 头文件
+* LICENSE 源码许可证
+* Makefile Makefile文件
+* ~~make.sh 编译脚本，已废弃，请忽略~~
+* out 编译输出目录
+  * bin 可执行文件目录
+  * obj 目标对象目录
+    * debug 包含调试信息的目标对象
+    * release 不包含调试信息的目标对象
+  * test 测试的可执行文件
+* README.md
+* src 源文件目录，该目录下的文件不包含main函数
+  * main 包含main函数的c程序，命名以`main-`开头
+  * test 包含main函数的测试源文件，命名以`test-`开头
+
+### make
+
+* `make mkoutdir` 创建输出目录，如果以下命令执行失败请执行该命令
+* `make` 编译生成可执行文件
+* `make main` 编译生成可执行文件
+* `make test` 编译生成可执行的测试文件
+* `make runtest` 编译运行所有测试文件
+* `make run-%` 编译运行某测试文件
+* `make main-%` 编译某可执行程序
+* `make test-%` 编译某可执行测试程序
+* `make clean` 清理make输出目录
