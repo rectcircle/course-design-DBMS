@@ -4,9 +4,22 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "make-runtest-all",
+			"type": "shell",
+			"group": "test",
+			"command": "make runtest"
+		},
+		{
 			"label": "make-test",
 			"type": "shell",
+			"group": "build",
 			"command": "make test"
+		},
+		{
+			"label": "make-main",
+			"type": "shell",
+			"group": "build",
+			"command": "make main"
 		}
 	]
 }

@@ -17,8 +17,8 @@ OBJ_DEBUG = $(patsubst %.c,${DIR_OBJ_BEBUG}/%.o,$(notdir ${SRC}))
 
 # 编译器配置
 CC = gcc
-CFLAGS = -Wall -I${DIR_INC}
-CFLAGS_DEBUG = -g -Wall -I${DIR_INC}
+CFLAGS = -std=c99 -Wall -I${DIR_INC}
+CFLAGS_DEBUG = -std=c99 -g -Wall -I${DIR_INC}
 
 #要构建的主程序名
 TARGET = $(patsubst %.c,%,$(notdir $(wildcard ${DIR_SRC_MAIN}/*.c)))
@@ -27,7 +27,7 @@ TARGET_TEST =  $(patsubst %.c,%,$(notdir $(wildcard ${DIR_SRC_TEST}/*.c)))
 
 # 编译所有主程序
 main:${TARGET}
-	@echo "构建完成"
+	@echo "\e[1;32m构建完成\e[0m"
 
 mkoutdir:
 	-mkdir -p ${DIR_OUT}
@@ -38,15 +38,15 @@ mkoutdir:
 
 #编译所有测试程序
 test:${TARGET_TEST}
-	@echo "测试程序构建完成"
+	@echo "\e[1;32m测试程序构建完成\e[0m"
 
 #运行所有测试程序
 runtest: $(patsubst %,run-%,${TARGET_TEST})
-	@echo "所有测试程序运行完成"
+	@echo "\e[1;32m所有测试程序运行完成\e[0m"
 
 #运行某个测试程序
 run-%: %
-	@echo "开始运行测试程序$(patsubst run-%,%,$@)"
+	@echo "\e[1;32m开始运行测试程序$(patsubst run-%,%,$@)\e[0m"
 	${DIR_BIN_BEBUG}/$(patsubst run-%,%,$@)
 
 #测试配置用
