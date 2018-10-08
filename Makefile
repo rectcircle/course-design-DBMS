@@ -18,7 +18,7 @@ OBJ_DEBUG = $(patsubst %.c,${DIR_OBJ_BEBUG}/%.o,$(notdir ${SRC}))
 # 编译器配置
 CC = gcc
 CFLAGS = -std=c99 -Wall -I${DIR_INC}
-CFLAGS_DEBUG = -std=c99 -g -Wall -I${DIR_INC}
+CFLAGS_DEBUG = -std=c99 -DPROFILE_TEST -g -Wall -I${DIR_INC}
 
 #要构建的主程序名
 TARGET = $(patsubst %.c,%,$(notdir $(wildcard ${DIR_SRC_MAIN}/*.c)))

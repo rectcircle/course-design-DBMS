@@ -15,7 +15,7 @@
  ******************************************************************************/
 
 /** 计算key的hash值 */
-static uint32 hashCode(uint8 *key, uint32 keyLen){
+private uint32 hashCode(uint8 *key, uint32 keyLen){
 	//改进的32位FNV算法1
 	static uint32 p = 16777619;
 	uint32 hash = 2166136261;
@@ -29,8 +29,18 @@ static uint32 hashCode(uint8 *key, uint32 keyLen){
 	return hash;
 }
 
+private LRUNode *makeLRUNode(uint8 *key, void *value){
+	LRUNode *node = (LRUNode *)malloc(sizeof(LRUNode));
+	node->key = key;
+	node->value = value;
+	node->prev = NULL;
+	node->next = NULL;
+	node->after = NULL;
+	return node;
+}
+
 /** 从HashTable中查找节点 */
-static LRUNode* getFromHashTable(LRUCache* cache, uint8* key, uint32 hashcode){
+private LRUNode* getFromHashTable(LRUCache* cache, uint8* key, uint32 hashcode){
 	uint32 index = hashcode & (cache->bucketCapacity-1);
 	LRUNode* p = cache->table[index];
 	while(p){
@@ -43,7 +53,7 @@ static LRUNode* getFromHashTable(LRUCache* cache, uint8* key, uint32 hashcode){
 }
 
 /** 直接插入到HashTable中，不考虑重复 */
-static void insertToHashTable(LRUCache* cache, LRUNode* node, uint32 hashcode){
+private void insertToHashTable(LRUCache* cache, LRUNode* node, uint32 hashcode){
 	uint32 index = hashcode & (cache->bucketCapacity - 1);
 	LRUNode *p = cache->table[index];
 	node->after = p;
@@ -51,7 +61,7 @@ static void insertToHashTable(LRUCache* cache, LRUNode* node, uint32 hashcode){
 }
 
 /** 从HashTable中删除一个节点并返回，不会释放内存 */
-static LRUNode *removeFromHashTable(LRUCache *cache, uint8 *key, uint32 hashcode){
+private LRUNode *removeFromHashTable(LRUCache *cache, uint8 *key, uint32 hashcode){
 	uint32 index = hashcode & (cache->bucketCapacity - 1);
 	LRUNode* p = cache->table[index];
 	//p第一个位置
@@ -73,13 +83,13 @@ static LRUNode *removeFromHashTable(LRUCache *cache, uint8 *key, uint32 hashcode
 }
 
 /** 从带头结点的双向循环链表中删除node节点：不会释放节点内存 */
-static void removeLRUNode(LRUNode *node){
+private void removeLRUNode(LRUNode *node){
 	node->prev->next = node->next;
 	node->next->prev = node->prev;
 }
 
 /** 向带头结点的双向循环链表头插入元素 */
-static void insertLRUNode(LRUNode *head, LRUNode *node){
+private void insertLRUNode(LRUNode *head, LRUNode *node){
 	node->next = head->next;
 	node->prev = head;
 	head->next->prev = node;
@@ -87,9 +97,15 @@ static void insertLRUNode(LRUNode *head, LRUNode *node){
 }
 
 /** 将节点搬移到循环队列的首部 */
-static void moveToFirst(LRUCache* cache, LRUNode* node){
+private void moveToFirst(LRUCache* cache, LRUNode* node){
 	removeLRUNode(node);
 	insertLRUNode(cache->head, node);
+}
+
+/** 默认的淘汰钩子函数：释放内存 */
+private void defaultEliminateHook(uint32 keyLen, uint8 *key, void *value) {
+	free(key);
+	free(value);
 }
 
 
@@ -124,25 +140,15 @@ LRUCache *makeLRUCache(uint32 capacity, uint32 keyLen){
 	return cache;
 }
 
-LRUNode *makeLRUNode(uint8 *key, uint8 *value){
-	LRUNode *node = (LRUNode *)malloc(sizeof(LRUNode));
-	node->key = key;
-	node->value = value;
-	node->prev = NULL;
-	node->next = NULL;
-	node->after = NULL;
-	return node;
-}
-
-void putLRUCache(LRUCache *cache, uint8 *key, uint8 *value){
-	putLRUCacheWithHook(cache, key, value, NULL);
+void putLRUCache(LRUCache *cache, uint8 *key, void *value){
+	putLRUCacheWithHook(cache, key, value, defaultEliminateHook);
 }
 
 void putLRUCacheWithHook(
 LRUCache *cache,
 uint8 *key,
-uint8 *value,
-void (*hook)(uint32, uint8 *, uint8 *)){
+void *value,
+void (*hook)(uint32, uint8 *, void *)){
 	uint32 hashcode = hashCode(key, cache->keyLen);
 	LRUNode* node = getFromHashTable(cache, key, hashcode);
 	if(node!=NULL){
@@ -162,8 +168,6 @@ void (*hook)(uint32, uint8 *, uint8 *)){
 			//调用hook
 			if(hook!=NULL) hook(cache->keyLen, node->key, node->value);
 			//清理内存
-			free(node->key); 
-			free(node->value);
 			node->key = key;
 			node->value = value;
 		} else {

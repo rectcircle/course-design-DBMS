@@ -42,7 +42,7 @@ typedef struct LRUNode
 	/** 键 */
 	uint8* key;
 	/** 值 */
-	uint8* value;
+	void* value;
 	/** 双向链表的前驱指针 */
 	struct LRUNode *prev;
 	/** 双向链表的后继指针 */
@@ -50,6 +50,10 @@ typedef struct LRUNode
 	/** 单链表的后继指针 */
 	struct LRUNode *after;
 } LRUNode;
+
+/*****************************************************************************
+ * 公开API
+ ******************************************************************************/
 
 /**
  * 创建一个可用的LRU缓存
@@ -60,25 +64,18 @@ typedef struct LRUNode
 LRUCache *makeLRUCache(uint32 capacity, uint32 keyLen);
 
 /**
- * 创建一个LRU节点，用来存放数据
- * @param key 键
- * @param value 值
- * @return {LRUNode} 一个可用LRU节点
- */
-LRUNode *makeLRUNode(uint8 *key, uint8* value);
-
-/**
- * 向LRU缓存中插入或更新一条数据
+ * 向LRU缓存中插入或更新一条数据，若发生淘汰，将会free key和value的内存
  * @param cache 待操作的LRU缓存对象
  * @param key 键
  * @param value 值
  */
-void putLRUCache(LRUCache *cache, uint8 *key, uint8 *value);
+void putLRUCache(LRUCache *cache, uint8 *key, void *value);
 
 /**
  * 向LRU缓存中插入或更新一条数据
  * 当有数据要被淘汰时，将执行hook函数，hook的定义如下：
- * void hook(uint32 keyLen, uint8* key, uint8* value)
+ * void hook(uint32 keyLen, uint8* key, void* value)
+ * 在函数体内不会free淘汰者的内存
  * @param cache 待操作的LRU缓存对象
  * @param key 键
  * @param value 值
@@ -87,8 +84,8 @@ void putLRUCache(LRUCache *cache, uint8 *key, uint8 *value);
 void putLRUCacheWithHook(
 	LRUCache *cache, 
 	uint8 *key, 
-	uint8 *value, 
-	void (*hook)(uint32, uint8*, uint8*));
+	void *value, 
+	void (*hook)(uint32, uint8*, void*));
 
 /**
  * 从LRU缓存中获取key对应的value，若不存在返回NULL
@@ -97,5 +94,19 @@ void putLRUCacheWithHook(
  * @return {int8 *} value字节数组或者NULL
  */
 uint8 *getLRUCache(LRUCache *cache, uint8 *key);
+
+/*****************************************************************************
+ * 私有且需要测试或在测试中要使用的函数
+ ******************************************************************************/
+#ifdef PROFILE_TEST
+/**
+ * 创建一个LRU节点，用来存放数据
+ * @param key 键
+ * @param value 值
+ * @return {LRUNode} 一个可用LRU节点
+ */
+LRUNode *makeLRUNode(uint8 *key, void *value);
+#endif
+
 
 #endif

@@ -58,7 +58,7 @@ typedef struct BTreeNode
 	 * 每个元素的长度为：(valueLen)字节
 	 */
 	uint8** values;
-	//已经被使用的key的数目
+	/** 已经被使用的key的数目*/
 	uint32 size;
 	/** 
 	 * 指向孩子的指针数组
@@ -74,24 +74,6 @@ typedef struct BTreeNode
 /*****************************************************************************
  * 公开API
  ******************************************************************************/
-
-/**
- * 创建一个可用B+树节点
- * @param config BTree类型结构，获取当前BTree基本配置
- * @param pageId 当前节点在磁盘中的块号
- * @param isLeaf 创建的节点是否是叶子节点
- * @return {BTreeNode*} 一个B+树的节点指针
- */
-BTreeNode* makeBTreeNode(BTree* config, uint64 pageId, int8 isLeaf);
-
-/**
- * 释放一个B+树节点所占用的内存
- * @param config BTree类型结构，获取当前BTree基本配置
- * @param node 要释放内存的节点
- * @param isLeaf 创建的节点是否是叶子节点
- * @return {BTreeNode*} 一个B+树的节点指针
- */
-void freeBTreeNode(BTree *config, BTreeNode* node, int8 isLeaf);
 
 /**
  * 创建一颗B+树，此函数还会创建一个根节点
@@ -143,5 +125,45 @@ int32 removeBTree(BTree *config, uint8 *key, uint8 *value);
  * @return {int32} 0 没有选中的数据，1 更新成功
  */
 int32 updateBTree(BTree *config, uint8 *key, uint8 *oldValue, uint8 *newValue);
+
+/*****************************************************************************
+ * 私有且需要测试或在测试中要使用的函数
+ ******************************************************************************/
+#ifdef PROFILE_TEST
+
+/**
+ * 创建一个可用B+树节点
+ * @param config BTree类型结构，获取当前BTree基本配置
+ * @param pageId 当前节点在磁盘中的块号
+ * @param isLeaf 创建的节点是否是叶子节点
+ * @return {BTreeNode*} 一个B+树的节点指针
+ */
+BTreeNode *makeBTreeNode(BTree *config, uint64 pageId, int8 isLeaf);
+
+/**
+ * 释放一个B+树节点所占用的内存
+ * @param config BTree类型结构，获取当前BTree基本配置
+ * @param node 要释放内存的节点
+ * @param isLeaf 创建的节点是否是叶子节点
+ * @return {BTreeNode*} 一个B+树的节点指针
+ */
+void freeBTreeNode(BTree *config, BTreeNode *node, int8 isLeaf);
+
+/**
+ * 针对B+树的一个节点的keys做二分查找
+ * 找到小于等于key的第一个元素的下标，若不存在返回-1
+ * 
+ * 例如： root->keys = {5, 5, 7, 9}
+ * key分别为     1  2 5 6 7 8 9 10
+ * 则返回值分别为 -1 -1 0 1 2 2 3 3
+ * 
+ * @param root   B+树的一个节点
+ * @param key    待查找的key字节数组的指针
+ * @param keyLen 带查找的key字节数组的长度
+ * @return root->keys中第一个小于等于key的元素下标，若不存在返回-1
+ */
+int32 binarySearch(BTreeNode *root, uint8 *key, uint32 keyLen);
+
+#endif
 
 #endif

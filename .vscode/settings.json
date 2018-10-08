@@ -6,6 +6,7 @@
 		"util.h": "c",
 		"string.h": "c",
 		"lrucache.h": "c",
-		"test.h": "c"
+		"test.h": "c",
+		"type_traits": "cpp"
 	}
 }

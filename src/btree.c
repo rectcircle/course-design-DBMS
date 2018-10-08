@@ -16,20 +16,7 @@
  * 通用私有辅助函数
  ******************************************************************************/
 
-/**
- * 针对B+树的一个节点的keys做二分查找
- * 找到小于等于key的第一个元素的下标，若不存在返回-1
- * 
- * 例如： root->keys = {5, 5, 7, 9}
- * key分别为     1  2 5 6 7 8 9 10
- * 则返回值分别为 -1 -1 0 1 2 2 3 3
- * 
- * @param root   B+树的一个节点
- * @param key    待查找的key字节数组的指针
- * @param keyLen 带查找的key字节数组的长度
- * @return root->keys中第一个小于等于key的元素下标，若不存在返回-1
- */
-static int32 binarySearch(BTreeNode* root, uint8* key, uint32 keyLen){
+private int32 binarySearch(BTreeNode* root, uint8* key, uint32 keyLen){
 	if(root->size==0){
 		return -1;
 	}
@@ -53,11 +40,7 @@ static int32 binarySearch(BTreeNode* root, uint8* key, uint32 keyLen){
 	return left;
 }
 
-
-/*****************************************************************************
- * makeBTreeNode的实现
- ******************************************************************************/
-BTreeNode *makeBTreeNode(BTree *config, uint64 pageId, int8 isLeaf){
+private BTreeNode *makeBTreeNode(BTree *config, uint64 pageId, int8 isLeaf){
 	//分配内存
 	BTreeNode *node = (BTreeNode *)malloc(sizeof(BTreeNode));
 	//初始化页面号
@@ -77,10 +60,7 @@ BTreeNode *makeBTreeNode(BTree *config, uint64 pageId, int8 isLeaf){
 	return node;
 }
 
-/*****************************************************************************
- * freeBTreeNode的实现
- ******************************************************************************/
-void freeBTreeNode(BTree *config, BTreeNode* node, int8 isLeaf){
+private void freeBTreeNode(BTree *config, BTreeNode* node, int8 isLeaf){
 	free(node->keys);
 	if(isLeaf){ //如果是叶子节点
 		free(node->values);

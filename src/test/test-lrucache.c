@@ -20,7 +20,7 @@ void outList(LRUCache* cache){
 	printf("\n");
 }
 
-void outEliminateData(uint32 keyLen, uint8*key , uint8* value){
+void outEliminateData(uint32 keyLen, uint8*key , void* value){
 	printf("<%d,%d>将要被淘汰 ", *(uint8 *)key, *(uint8 *)value);
 }
 
