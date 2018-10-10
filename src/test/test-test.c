@@ -8,6 +8,22 @@
  */
 #include "test.h"
 
+void test(){
+	assertnull((void*)1,"测试失败检查1");
+	assertnull((void *)2, "测试失败检查2");
+}
+
+void test1(){
+	assertint(2, 1 + 1,"成功");
+	assertint(1,2,"测试失败检查1");
+}
+
+void test2(){
+	assertint(2, 1 + 1,"成功");
+}
+
+TESTFUNC funcs[] = {test, test1, test2};
+
 int main(int argc, char const *argv[])
 {
 	// assert(0, "1==1");
@@ -19,6 +35,8 @@ int main(int argc, char const *argv[])
 	// assertstring("abc", "cba", "返回值应该是abc");
 	// assertbytearray("abc", "cba", 4, "返回值应该是[97, 98, 99, 0]");
 	// assertnull((void *)1213, "返回值应该是NULL");
+	// launchTests(3, test, test1, test2);
+	launchTestArray(sizeof(funcs)/sizeof(TESTFUNC), funcs);
 	return 0;
 }
 

@@ -73,7 +73,7 @@ void testAll()
 int main(int argc, char const *argv[])
 {
 	printf("=========test All=========\n");
-	testAll();
+	launchTests(1, testAll);
 	return 0;
 }
 

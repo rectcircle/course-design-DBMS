@@ -10,24 +10,79 @@
 #include "test.h"
 
 
+jmp_buf* TESTENV = NULL;
+
+int launchTests(int len, ...){
+	TESTENV = (jmp_buf *)malloc(sizeof(jmp_buf));
+	va_list valist;
+	va_start(valist, len);
+	int sum=0;
+	for(int i=0; i<len; i++){
+		int ans = setjmp(*TESTENV);
+		if(ans==0){
+			va_arg(valist, TESTFUNC)();
+		} else if(ans==1) {
+			sum += 1;
+		}
+		
+	}
+	va_end(valist);
+	printf("\e[1;33m测试结果：\e[0m\e[1m总共 %d \e[1;32m成功 %d \e[1;31m失败 %d\e[0m\n", len, len - sum, sum);
+	free(TESTENV);
+	TESTENV = NULL;
+	return sum;
+}
+
+int launchTestArray(int len, TESTFUNC* funcArray){
+	TESTENV = (jmp_buf *)malloc(sizeof(jmp_buf));
+	int sum=0;
+	for(int i=0; i<len; i++){
+		int ans = setjmp(*TESTENV);
+		if(ans==0){
+			funcArray[i]();
+		} else if(ans==1) {
+			sum += 1;
+		}
+		
+	}
+	printf("\e[1;33m测试结果：\e[0m\e[1m总共 %d \e[1;32m成功 %d \e[1;31m失败 %d\e[0m\n", len, len - sum, sum);
+	free(TESTENV);
+	TESTENV = NULL;
+	return sum;
+}
+
+
 /*****************************************************************************
  * assert
  ******************************************************************************/
-void assert(int cond, const char * errMsg){
+static int assert(int cond, const char * errMsg){
 	if(!cond){
 		fprintf(stderr, "\e[1;31m测试失败：\e[1;33m%s\e[0m\n", errMsg);
-		exit(-1);
+		return 1;
 	}
+	return 0;
 }
 
-/**
- * 针对基本数据类型的断言
- */
+static void exitTest(int result){
+	if(result==1){
+		if (TESTENV==NULL){
+			exit(1);
+		} else {
+			longjmp(*TESTENV, 1);
+		}
+	}
+	
+}
+
+/*****************************************************************************
+ * assert
+ ******************************************************************************/
 void assertchar(char expect, char actual, const char *errMsg){
 	char* buffer = malloc(sizeof(char)*strlen(errMsg)+128);
-	sprintf(buffer, "\n\e[0m期望：\e[1;32m\n\t%c\n\e[0m实际：\e[1;31m\n\t%c\n\e[0m错误消息：\e[1;33m\n\t%s\e[0m", expect, actual, errMsg);
-	assert(expect==actual, buffer);
+	sprintf(buffer, "\n\e[0m期望：\e[1;32m\n\t%c\n\e[0m实际：\e[1;31m\n\t%c\n\e[0m测试说明：\e[1;33m\n\t%s\e[0m", expect, actual, errMsg);
+	int result = assert(expect==actual, buffer);
 	free(buffer);
+	exitTest(result);
 }
 void assertshort(short expect, short actual, const char *errMsg){
 	assertlonglong(expect, actual, errMsg);
@@ -40,9 +95,10 @@ void assertlong(long expect, long actual, const char *errMsg){
 }
 void assertlonglong(long long expect, long long actual, const char *errMsg){
 	char *buffer = malloc(sizeof(char) * strlen(errMsg) + 128);
-	sprintf(buffer, "\n\e[0m期望：\e[1;32m\n\t%lld\n\e[0m实际：\e[1;31m\n\t%lld\n\e[0m错误消息：\e[1;33m\n\t%s\e[0m", expect, actual, errMsg);
-	assert(expect == actual, buffer);
+	sprintf(buffer, "\n\e[0m期望：\e[1;32m\n\t%lld\n\e[0m实际：\e[1;31m\n\t%lld\n\e[0m测试说明：\e[1;33m\n\t%s\e[0m", expect, actual, errMsg);
+	int result = assert(expect == actual, buffer);
 	free(buffer);
+	exitTest(result);
 }
 
 void assertuchar(unsigned char expect, unsigned char actual, const char *errMsg){
@@ -59,9 +115,10 @@ void assertulong(unsigned long expect, unsigned long actual, const char *errMsg)
 }
 void assertulonglong(unsigned long long expect, unsigned long long actual, const char *errMsg){
 	char *buffer = malloc(sizeof(char) * strlen(errMsg) + 128);
-	sprintf(buffer, "\n\e[0m期望：\e[1;32m\n\t%llu\n\e[0m实际：\e[1;31m\n\t%llu\n\e[0m错误消息：\e[1;33m\n\t%s\e[0m", expect, actual, errMsg);
-	assert(expect == actual, buffer);
+	sprintf(buffer, "\n\e[0m期望：\e[1;32m\n\t%llu\n\e[0m实际：\e[1;31m\n\t%llu\n\e[0m测试说明：\e[1;33m\n\t%s\e[0m", expect, actual, errMsg);
+	int result = assert(expect == actual, buffer);
 	free(buffer);
+	exitTest(result);
 }
 
 void assertfloat(float expect, float actual, const char *errMsg){
@@ -72,9 +129,10 @@ void assertdouble(double expect, double actual, const char *errMsg){
 }
 void assertlongdouble(long double expect, long double actual, const char *errMsg){
 	char *buffer = malloc(sizeof(char) * strlen(errMsg) + 256);
-	sprintf(buffer, "\n\e[0m期望：\e[1;32m\n\t%Lf\n\e[0m实际：\e[1;31m\n\t%Lf\n\e[0m错误消息：\e[1;33m\n\t%s\e[0m", expect, actual, errMsg);
-	assert(expect == actual, buffer);
+	sprintf(buffer, "\n\e[0m期望：\e[1;32m\n\t%Lf\n\e[0m实际：\e[1;31m\n\t%Lf\n\e[0m测试说明：\e[1;33m\n\t%s\e[0m", expect, actual, errMsg);
+	int result = assert(expect == actual, buffer);
 	free(buffer);
+	exitTest(result);
 }
 
 void assertbool(int expect, int actual, const char *errMsg){
@@ -82,24 +140,26 @@ void assertbool(int expect, int actual, const char *errMsg){
 	char *buffer = malloc(sizeof(char) * strlen(errMsg) + 256);
 	sprintf(
 		buffer, 
-		"\n\e[0m期望：\e[1;32m\n\t%s\n\e[0m实际：\e[1;31m\n\t%s\n\e[0m错误消息：\e[1;33m\n\t%s\e[0m", 
+		"\n\e[0m期望：\e[1;32m\n\t%s\n\e[0m实际：\e[1;31m\n\t%s\n\e[0m测试说明：\e[1;33m\n\t%s\e[0m", 
 		boolStringArray[expect?1:0], 
 		boolStringArray[actual?1:0], 
 		errMsg);
-	assert(expect == actual, buffer);
+	int result = assert(expect == actual, buffer);
 	free(buffer);
+	exitTest(result);
 }
 
 void assertstring(const char *expect, const char *actual, const char *errMsg){
 	char *buffer = malloc(sizeof(char) * strlen(errMsg) + 256 + strlen(expect)+strlen(actual)+2);
 	sprintf(
 		buffer,
-		"\n\e[0m期望：\e[1;32m\n\t%s\n\e[0m实际：\e[1;31m\n\t%s\n\e[0m错误消息：\e[1;33m\n\t%s\e[0m",
+		"\n\e[0m期望：\e[1;32m\n\t%s\n\e[0m实际：\e[1;31m\n\t%s\n\e[0m测试说明：\e[1;33m\n\t%s\e[0m",
 		expect,
 		actual,
 		errMsg);
-	assert(strcmp(expect, actual)==0, buffer);
+	int result = assert(strcmp(expect, actual) == 0, buffer);
 	free(buffer);
+	exitTest(result);
 }
 
 static char* byteArrayToString(const char * array, int len){
@@ -125,23 +185,25 @@ void assertbytearray(const char *expect, const char *actual, int len, const char
 	char *buffer = malloc(sizeof(char) * strlen(errMsg) + 256 + strlen(expectStr) + strlen(actualStr) + 2);
 	sprintf(
 		buffer,
-		"\n\e[0m期望：\e[1;32m\n\t%s\n\e[0m实际：\e[1;31m\n\t%s\n\e[0m错误消息：\e[1;33m\n\t%s\e[0m",
+		"\n\e[0m期望：\e[1;32m\n\t%s\n\e[0m实际：\e[1;31m\n\t%s\n\e[0m测试说明：\e[1;33m\n\t%s\e[0m",
 		expectStr,
 		actualStr,
 		errMsg);
-	assert(memcmp((void *)expect, (void *)actual, len) == 0, buffer);
+	int result = assert(memcmp((void *)expect, (void *)actual, len) == 0, buffer);
 	free(expectStr);
 	free(actualStr);
 	free(buffer);
+	exitTest(result);
 }
 
 void assertnull(void *actual, const char *errMsg){
 	char *buffer = malloc(sizeof(char) * strlen(errMsg) + 256);
 	sprintf(
 		buffer,
-		"\n\e[0m期望：\e[1;32m\n\tNULL指针\n\e[0m实际：\e[1;31m\n\t%p\n\e[0m错误消息：\e[1;33m\n\t%s\e[0m",
+		"\n\e[0m期望：\e[1;32m\n\tNULL指针\n\e[0m实际：\e[1;31m\n\t%p\n\e[0m测试说明：\e[1;33m\n\t%s\e[0m",
 		actual,
 		errMsg);
-	assert(actual==NULL, buffer);
+	int result = assert(actual == NULL, buffer);
 	free(buffer);
+	exitTest(result);
 }

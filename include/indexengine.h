@@ -1,7 +1,7 @@
 /*****************************************************************************
  * Copyright (c) 2018, rectcircle. All rights reserved.
  * 
- * @filename: lrucache.h 
+ * @filename: indexengine.h 
  * @description: 索引存储引擎API
  * @author: Rectcircle
  * @version: 1.0

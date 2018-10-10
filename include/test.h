@@ -14,18 +14,33 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
+#include <setjmp.h>
 
 /**
- * 测试断言，cond为0时，测试不通过输出errMsg并以-1退出码退出
- * @param cond 条件 
- * @param errMsg 错误信息
- * @exit -1 测试不通过
+ * 可以传给launchTests的类型
  */
-void assert(int cond, const char *errMsg);
+typedef void (*TESTFUNC)(void);
 
-/**
- * 针对基本数据类型的断言
- */
+/******************************************************************************
+ * 运行测试程序
+ * @param len 可变参数列表长度
+ * @param {...} TESTFUNC 类型的可变参数
+ * @return {int} 测试失败的数目
+ ******************************************************************************/
+int launchTests(int len, ...);
+
+/** 运行测试程序：参数为数组 */
+int launchTestArray(int len, TESTFUNC* funcArray);
+
+/******************************************************************************
+ * 常用的断言函数
+ * 直接调用：若测试失败（即expect!=actual），直接通过exit(1)退出
+ * 使用launchTestxxx：将使用长跳机制执行跳出
+ * @param expect 期望结果
+ * @param actual 程序运行结果
+ * @param errMsg 测试说明
+ ******************************************************************************/
 void assertchar(char expect, char actual, const char *errMsg);
 void assertshort(short expect, short actual, const char *errMsg);
 void assertint(int expect, int actual, const char *errMsg);
