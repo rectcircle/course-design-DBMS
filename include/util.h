@@ -13,6 +13,7 @@
 
 #include "global.h"
 #include <string.h>
+#include <arpa/inet.h>
 
 /**
  * 字节数组的比较大小
@@ -79,5 +80,20 @@ int32 batchDeleteFromArray(
  */
 int32 deleteFromArray(void** array, uint32 len, uint32 index);
 
+
+/**
+ * 64位整形字节序转换
+ */
+#define __swap64(val) (((val) >> 56) |                        \
+					 (((val)&0x00ff000000000000ll) >> 40) | \
+					 (((val)&0x0000ff0000000000ll) >> 24) | \
+					 (((val)&0x000000ff00000000ll) >> 8) |  \
+					 (((val)&0x00000000ff000000ll) << 8) |  \
+					 (((val)&0x0000000000ff0000ll) << 24) | \
+					 (((val)&0x000000000000ff00ll) << 40) | \
+					 (((val) << 56)))
+
+#define htonll(val) ((htons(1)==1) ? val : __swap64(val))
+#define ntohll(val) hton64(val)
 
 #endif
