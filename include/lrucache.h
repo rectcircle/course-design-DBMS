@@ -80,8 +80,9 @@ void putLRUCache(LRUCache *cache, uint8 *key, void *value);
  * @param key 键
  * @param value 值
  * @param hook 淘汰数据执行的hook
+ * @return {void*} 返回被淘汰value的指针
  */
-void putLRUCacheWithHook(
+void* putLRUCacheWithHook(
 	LRUCache *cache, 
 	uint8 *key, 
 	void *value, 

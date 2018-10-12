@@ -13,11 +13,13 @@
 
 #include "global.h"
 #include "util.h"
+#include "lrucache.h"
 #include <fcntl.h>
 #include <unistd.h>
 #include <malloc.h>
 #include <arpa/inet.h>
 #include <sys/stat.h>
+#include <pthread.h>
 
 /*****************************************************************************
  * 宏定义
@@ -55,11 +57,31 @@
  * 数据页类型宏
  */
 /** 非叶子节点页（链接节点） */
-#define TYPE_LINK 1
+#define NODE_TYPE_LINK 1
 /** 带元数据的叶子节点页 */
-#define TYPE_LEAF_WITH_META 2
+#define NODE_TYPE_LEAF_WITH_META 2
 /** 不带元数据的叶子节点页 */
-#define TYPE_LEAF_NO_META 3
+#define NODE_TYPE_LEAF_NO_META 3
+
+/**
+ * 缓存状态宏
+ */
+/** 没有正常状态 */
+#define CACHE_STATUS_NORMAL 0
+/** 正在进行Freeze和Work切换 */
+#define CACHE_STATUS_SWITCH_CHANGE 1
+/** 正在进行持久化 */
+#define CACHE_STATUS_PERSISTENCE 2
+
+/**
+ * 节点状态宏
+ */
+/** 与磁盘一致状态 */
+#define NODE_STATUS_OLD 0
+/** 磁盘中不存在对应节点 */
+#define NODE_STATUS_NEW 1
+/** 与磁盘中不一致 */
+#define NODE_STATUS_UPDATE 2
 
 /*****************************************************************************
  * 结构定义
@@ -90,6 +112,22 @@ typedef struct IndexTreeMeta
 	uint64 sqt;
 } IndexTreeMeta;
 
+/** 需要用到的缓存和状态 */
+typedef struct IndexCache{
+	/** 存放从磁盘中读取的页，这些页的数据没有发生修改 */
+	struct LRUCache *unchangeCache;
+	/** 存放与磁盘不一致的页 */
+	struct LRUCache *changeCacheWork;
+	/** 存放与磁盘不一致的页用于持久化 */
+	struct LRUCache *changeCacheFreeze;
+	/** 缓存状态 */
+	volatile int32 status;
+	/** 条件变量，用于控制并发 */
+	pthread_cond_t statusCond;
+	/** 用于互斥更改状态 */
+	pthread_mutex_t statusMutex;
+} IndexCache;
+
 /**
  * 索引引擎
  */
@@ -112,6 +150,8 @@ typedef struct IndexEngine {
 	uint64 usedPageCnt;
 	/** 该索引数据计数(共多少条数据) */
 	uint64 count;
+	/** 运行时缓存 */
+	struct IndexCache cache;
 	/** B+树的元数据 */
 	struct IndexTreeMeta treeMeta;
 } IndexEngine;
@@ -125,7 +165,7 @@ typedef struct IndexTreeNode
 	uint64 pageId;
 	/** 若该页被修改，该字段有效*/
 	uint64 newPageId;
-	/** 该页的类型，类型参见TYPE_XXX宏 */
+	/** 该页的类型，类型参见NODE_TYPE_XXX宏 */
 	uint8 type;
 	/** 已经被使用的key的数目*/
 	uint32 size;
@@ -137,6 +177,8 @@ typedef struct IndexTreeNode
 	uint64 effect;
 	/** 当前页为叶子节点页，指向下一个数据页所在的位置 */
 	uint64 after;
+	/** 节点状态：参见NODE_STATUS_XXX 宏 */
+	int32 status;
 	/** 
 	 * key的数组
 	 * 数组的长度为：(BTree.degree+1)，多余的一个空间用于节点分裂使用
@@ -214,6 +256,7 @@ int32 updateIndexEngine(IndexEngine *engine, uint8 *key, uint8 *oldValue, uint8 
  * @param isUnique 是否唯一
  * @param keyLen 键字节数
  * @param valueLen 值字节数
+ * @param maxHeapSize 最大堆内存大小 0 表示96M
  * @return 一个可用的 索引引擎指针，参数异常，返回NULL
  */
 IndexEngine *makeIndexEngine(
@@ -221,15 +264,17 @@ IndexEngine *makeIndexEngine(
 	uint32 keyLen,
 	uint32 valueLen,
 	uint32 pageSize,
-	int8 isUnique);
+	int8 isUnique,
+	uint64 maxHeapSize);
 
 /**
  * 从文件系统加载一个索引引擎，文件不存在返回NULL
  * 会进行启动检查，恢复状态
  * @param filename 文件路径
+ * @param maxHeapSize 最大堆内存大小 0 表示96M
  * @return 一个可用的 索引引擎指针，文件不存在返回NULL
  */
-IndexEngine *loadIndexEngine(char *filename);
+IndexEngine *loadIndexEngine(char *filename, uint64 maxHeapSize);
 
 /*****************************************************************************
  * 辅助函数
@@ -318,7 +363,7 @@ void bufferToNode(
  * @param buffer 缓冲
  * @param len 写的长度
  */
-void writePageIndexFile(IndexEngine *engine, uint64 pageId, char *buffer, uint32 len);
+uint64 writePageIndexFile(IndexEngine *engine, uint64 pageId, char *buffer, uint32 len);
 
 /**
  * 读取入某一页
@@ -327,7 +372,17 @@ void writePageIndexFile(IndexEngine *engine, uint64 pageId, char *buffer, uint32
  * @param buffer 缓冲
  * @param len 读的长度
  */
-void readPageIndexFile(IndexEngine* engine, uint64 pageId, char *buffer, uint32 len);
+uint64 readPageIndexFile(IndexEngine *engine, uint64 pageId, char *buffer, uint32 len);
+
+/**
+ * 从缓存或磁盘中读区一个节点
+ * 此函数非常重要，涉及淘汰，启动持久化线程等工作
+ * @param engine IndexEngine
+ * @param pageId 页号
+ * @param nodeType 节点类型
+ * @return {IndexTreeNode *} 可用的IndexTreeNode
+ */
+IndexTreeNode *getTreeNodeByPageId(IndexEngine *engine, uint64 pageId, int32 nodeType);
 
 #endif
 

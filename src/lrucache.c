@@ -144,11 +144,12 @@ void putLRUCache(LRUCache *cache, uint8 *key, void *value){
 	putLRUCacheWithHook(cache, key, value, defaultEliminateHook);
 }
 
-void putLRUCacheWithHook(
+void* putLRUCacheWithHook(
 LRUCache *cache,
 uint8 *key,
 void *value,
 void (*hook)(uint32, uint8 *, void *)){
+	void* result =NULL;
 	uint32 hashcode = hashCode(key, cache->keyLen);
 	LRUNode* node = getFromHashTable(cache, key, hashcode);
 	if(node!=NULL){
@@ -165,6 +166,7 @@ void (*hook)(uint32, uint8 *, void *)){
 			//从双向链表中删除节点
 			removeLRUNode(node);
 			//复用node节点
+			result = node->value;
 			//调用hook
 			if(hook!=NULL) hook(cache->keyLen, node->key, node->value);
 			//清理内存
@@ -179,6 +181,7 @@ void (*hook)(uint32, uint8 *, void *)){
 		//插到HashMap结构中
 		insertToHashTable(cache, node, hashcode);
 	}
+	return result;
 }
 
 uint8 *getLRUCache(LRUCache *cache, uint8 *key){

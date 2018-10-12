@@ -9,6 +9,7 @@
 		"test.h": "c",
 		"type_traits": "cpp",
 		"setjmp.h": "c",
-		"indexengine.h": "c"
+		"indexengine.h": "c",
+		"fcntl.h": "c"
 	}
 }

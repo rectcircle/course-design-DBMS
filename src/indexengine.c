@@ -16,7 +16,7 @@ static const uint32 MAGIC_NUMBER=0x960729dbu;
 static const uint32 MAX_META_SIZE=120;
 
 /*****************************************************************************
- * 私有文件操作、序列化、反序列化函数
+ * 私有函数：文件操作、序列化、反序列化函数
  ******************************************************************************/
 
 private int createIndexFile(const char * filename){
@@ -73,7 +73,7 @@ private void metaToBuffer(IndexEngine* engine, char* buffer){
 
 private void nodeToBuffer(IndexEngine* engine, IndexTreeNode *node, int32 nodeType, char* buffer){
 	int len = 0;
-	if(nodeType==TYPE_LEAF_NO_META){
+	if(nodeType==NODE_TYPE_LEAF_NO_META){
 		len += copyToBuffer(buffer + len, &node->after, sizeof(node->after));
 		len += copyToBuffer(buffer + len, &node->flag, sizeof(node->flag));
 	} else {
@@ -86,7 +86,7 @@ private void nodeToBuffer(IndexEngine* engine, IndexTreeNode *node, int32 nodeTy
 	uint32 keyLen = engine->treeMeta.keyLen;
 	uint32 valueLen = engine->treeMeta.valueLen;
 
-	if(nodeType==TYPE_LINK){
+	if(nodeType==NODE_TYPE_LINK){
 		for (int i = 0; i < node->size; i++){
 			memcpy(buffer + len, node->keys[i], keyLen);
 			len += keyLen;
@@ -143,27 +143,173 @@ private void bufferToMeta(IndexEngine* engine, char* buffer){
 	len += parseFromBuffer(buffer + len, &engine->usedPageCnt, sizeof(engine->usedPageCnt));
 }
 
-void bufferToNode(
+private void bufferToNode(
 	IndexEngine *engine,
 	IndexTreeNode *node,
 	int32 nodeType,
-	char *buffer)
-{
+	char *buffer){
 
+	node->status = NODE_STATUS_OLD;
+	node->type = nodeType;
+	
+	int len = 0;
+	if(nodeType==NODE_TYPE_LEAF_NO_META){
+		len += parseFromBuffer(buffer + len, &node->after, sizeof(node->after));
+		len += parseFromBuffer(buffer + len, &node->flag, sizeof(node->flag));
+	} else {
+		len += parseFromBuffer(buffer + len, &node->next, sizeof(node->next));
+		len += parseFromBuffer(buffer + len, &node->effect, sizeof(node->effect));
+		len += parseFromBuffer(buffer + len, &node->size, sizeof(node->size));
+		len += parseFromBuffer(buffer + len, &node->flag, sizeof(node->flag));
+		len += parseFromBuffer(buffer + len, &node->after, sizeof(node->after));
+	}
+	uint32 keyLen = engine->treeMeta.keyLen;
+	uint32 valueLen = engine->treeMeta.valueLen;
+	node->keys = (uint8**) malloc(sizeof(uint8*)*(engine->treeMeta.degree+1));
+	if(nodeType==NODE_TYPE_LINK){
+		node->children = (uint64*)malloc(sizeof(uint64)*(engine->treeMeta.degree+1));
+		for (int i = 0; i < node->size; i++){
+			node->keys[i] = (uint8*)malloc(sizeof(uint8)*engine->treeMeta.keyLen);
+			memcpy(node->keys[i], buffer + len, keyLen);
+			len += keyLen;
+			len += parseFromBuffer(buffer + len, &node->children[i], sizeof(node->children[i]));
+		}
+	} else {
+		node->values = (uint8**) malloc(sizeof(uint8*)*(engine->treeMeta.degree+1));
+		for (int i = 0; i < node->size; i++){
+			node->keys[i] = (uint8 *)malloc(sizeof(uint8) * engine->treeMeta.keyLen);
+			memcpy(node->keys[i], buffer + len, keyLen);
+			len += keyLen;
+			node->values[i] = (uint8 *)malloc(sizeof(uint8) * engine->treeMeta.valueLen);
+			memcpy(node->values[i], buffer + len, valueLen);
+			len += valueLen;
+		}
+	}
 }
 
-private void writePageIndexFile(IndexEngine* engine, uint64 pageId, char *buffer, uint32 len){
+private uint64 writePageIndexFile(IndexEngine* engine, uint64 pageId, char *buffer, uint32 len){
 	lseek(engine->fd, pageId*engine->pageSize, SEEK_SET);
-	write(engine->fd, buffer, len);
+	return write(engine->fd, buffer, len);
 }
 
-private void readPageIndexFile(IndexEngine* engine, uint64 pageId, char *buffer, uint32 len){
+private uint64 readPageIndexFile(IndexEngine* engine, uint64 pageId, char *buffer, uint32 len){
 	lseek(engine->fd, pageId * engine->pageSize, SEEK_SET);
-	read(engine->fd, buffer, len);
+	return read(engine->fd, buffer, len);
+}
+
+/** 根据最大堆内存大小，创建引擎需要用到的缓存,返回0表示成功 */
+static int32 initIndexCache(IndexEngine* engine, uint64 maxHeapSize){
+	uint32 capacity = (maxHeapSize/3 - 32) / (32/3+48+engine->treeMeta.keyLen+engine->treeMeta.valueLen);
+	if(capacity<3){
+		return -1;
+	}
+	engine->cache.unchangeCache = makeLRUCache(capacity, sizeof(engine->treeMeta.root));
+	engine->cache.changeCacheWork = makeLRUCache(capacity, sizeof(engine->treeMeta.root));
+	engine->cache.changeCacheFreeze = makeLRUCache(capacity, sizeof(engine->treeMeta.root));
+	engine->cache.status = 0;
+	pthread_cond_init(&engine->cache.statusCond, NULL);
+	pthread_mutex_init(&engine->cache.statusMutex, NULL);
+	return 0;
+}
+
+/** 切换change缓存 */
+static void swapChangeCache(IndexEngine *engine){
+	LRUCache* tmp = engine->cache.changeCacheFreeze;
+	engine->cache.changeCacheFreeze = engine->cache.changeCacheWork;
+	engine->cache.changeCacheWork = tmp;
+}
+
+static void cacheEliminateHook(uint32 keyLen, uint8 *key, void *value) {
+	free(key);
+}
+
+private IndexTreeNode* getTreeNodeByPageId(IndexEngine *engine, uint64 pageId, int32 nodeType){
+	LRUCache *changeCacheWork = engine->cache.changeCacheWork;
+	LRUCache *changeCacheFreeze = engine->cache.changeCacheFreeze;
+	LRUCache *unchangeCache = engine->cache.unchangeCache;
+	uint64 *key = NULL;
+
+	//首先从changeCacheWork中获取
+	IndexTreeNode *result = getLRUCache(changeCacheWork, &pageId);
+	if(result!=NULL){
+		//可以获取到直接返回
+		return result;
+	}
+
+	//否则判断是否需要在changeCacheFreeze中获取
+	pthread_mutex_lock(&engine->cache.statusMutex);
+	//当缓存处于切换工作、冻结缓存的时候，等待
+	while(engine->cache.status==CACHE_STATUS_SWITCH_CHANGE){
+		pthread_cond_wait(&engine->cache.statusCond, &engine->cache.statusMutex);
+	}
+	//当前处于持久化中的状态，搜索冻结的缓存
+	if(engine->cache.status==CACHE_STATUS_PERSISTENCE){
+		result = getLRUCache(changeCacheFreeze, &pageId);
+	}
+	//获取到了，插入到changeCacheWork
+	if (result != NULL){
+		key = (uint64*) malloc(sizeof(uint64));
+		*key = pageId;
+		putLRUCache(changeCacheWork, key, (void*)result);
+	}
+	//changeCacheWork满了
+	if(changeCacheWork->size==changeCacheWork->capacity){
+		//等待持久化线程结束
+		while (engine->cache.status != CACHE_STATUS_NORMAL){
+			pthread_cond_wait(&engine->cache.statusCond, &engine->cache.statusMutex);
+		}
+		//进行cache切换
+		engine->cache.status = CACHE_STATUS_SWITCH_CHANGE;
+		swapChangeCache(engine);
+		//TODO 启动持久化线程（将状态设为持久化）
+	}
+	pthread_mutex_unlock(&engine->cache.statusMutex);
+	if (result != NULL){
+		return result;
+	}
+
+	//从unchangeCache中读取
+	result = getLRUCache(unchangeCache, &pageId);
+	if(result!=NULL){
+		return result;
+	}
+
+	//从文件中读取
+	result = (IndexTreeNode*)malloc(sizeof(IndexTreeNode));
+	memset((void*)result, 0, sizeof(IndexTreeNode));
+	char * buffer = (char*)malloc(sizeof(char)*engine->pageSize);
+	readPageIndexFile(engine, pageId, buffer, engine->pageSize);
+	bufferToNode(engine, result, nodeType, buffer);
+	key = (uint64 *)malloc(sizeof(uint64));
+	*key = pageId;
+	IndexTreeNode *eliminateNode = (IndexTreeNode *)putLRUCacheWithHook(unchangeCache, key, (void *)result, cacheEliminateHook);
+	//没有发生淘汰
+	if(eliminateNode==NULL){
+		return result;
+	}
+	//发生淘汰，且淘汰的节点不是和磁盘中一致，放到，changeCacheWork中
+	if(eliminateNode->status!=NODE_STATUS_OLD){
+		key = (uint64 *)malloc(sizeof(uint64));
+		*key = pageId;
+		putLRUCache(changeCacheWork, key, eliminateNode);
+	}
+		//changeCacheWork满了
+	if(changeCacheWork->size==changeCacheWork->capacity){
+		pthread_mutex_lock(&engine->cache.statusMutex);
+		while (engine->cache.status != CACHE_STATUS_NORMAL){
+			pthread_cond_wait(&engine->cache.statusCond, &engine->cache.statusMutex);
+		}
+		//进行cache切换
+		engine->cache.status = CACHE_STATUS_SWITCH_CHANGE;
+		swapChangeCache(engine);
+		//TODO 启动持久化线程（将状态设为持久化）
+		pthread_mutex_unlock(&engine->cache.statusMutex);
+	}
+	return result;
 }
 
 /*****************************************************************************
- * 公开API文件操作
+ * 公开API：文件操作
  ******************************************************************************/
 
 IndexEngine *makeIndexEngine(
@@ -171,7 +317,8 @@ IndexEngine *makeIndexEngine(
 	uint32 keyLen,
 	uint32 valueLen,
 	uint32 pageSize,
-	int8 isUnique)
+	int8 isUnique,
+	uint64 maxHeapSize)
 {
 	//初始化为16k
 	if(pageSize==0) pageSize = 16*1024; 
@@ -226,6 +373,11 @@ IndexEngine *makeIndexEngine(
 	char rootBuffer[32];
 	memset(rootBuffer, 0, sizeof(rootBuffer));
 	writePageIndexFile(engine, 1, rootBuffer, sizeof(rootBuffer));
+	//创建缓存
+	if(initIndexCache(engine, maxHeapSize)!=0){
+		free(engine);
+		return NULL;
+	}
 	//修改flag字段，强刷磁盘操作
 	CLR_CREATING(engine->flag);
 	uint32 flag = htonl(engine->flag);
@@ -235,7 +387,8 @@ IndexEngine *makeIndexEngine(
 	return engine;
 }
 
-IndexEngine *loadIndexEngine(char *filename){
+IndexEngine *loadIndexEngine(char *filename, uint64 maxHeapSize)
+{
 	int fd = openIndexFile(filename);
 	if(fd==-1) return NULL;
 	IndexEngine* engine = (IndexEngine*) malloc(sizeof(IndexEngine));
@@ -243,7 +396,8 @@ IndexEngine *loadIndexEngine(char *filename){
 	engine->filename = filename;
 	char metaBuffer[MAX_META_SIZE];
 	engine->pageSize = MAX_META_SIZE; //临时设置
-	readPageIndexFile(engine, 0, metaBuffer, MAX_META_SIZE);
+	uint64 readLen = readPageIndexFile(engine, 0, metaBuffer, MAX_META_SIZE);
+	if(readLen<MAX_META_SIZE) return NULL;
 	bufferToMeta(engine, metaBuffer);
 	uint32 flag = engine->flag;
 	engine->treeMeta.isUnique = IS_UNIQUE(flag);
@@ -265,5 +419,23 @@ IndexEngine *loadIndexEngine(char *filename){
 	}
 	//TODO 进行碎片整理，根据配置是否进行
 	//TODO 执行重做日志
+	if(initIndexCache(engine, maxHeapSize)!=0){
+		free(engine);
+		return NULL;
+	}
 	return engine;
+}
+
+/*****************************************************************************
+ * 公开API：查询
+ ******************************************************************************/
+Array *searchIndexEngine(IndexEngine *engine, uint8 *key){
+	int32 rootType;
+	if(engine->treeMeta.depth==1){
+		rootType = NODE_TYPE_LEAF_WITH_META;
+	} else {
+		rootType = NODE_TYPE_LINK;
+	}
+	IndexTreeNode *root = getTreeNodeByPageId(engine, engine->treeMeta.root, rootType);
+	//TODO 完成
 }
