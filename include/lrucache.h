@@ -65,11 +65,12 @@ LRUCache *makeLRUCache(uint32 capacity, uint32 keyLen);
 
 /**
  * 向LRU缓存中插入或更新一条数据，若发生淘汰，将会free key和value的内存
+ * key内存有缓存自动管理，即插入创建拷贝，删除淘汰释放内存
  * @param cache 待操作的LRU缓存对象
  * @param key 键
  * @param value 值
  */
-void putLRUCache(LRUCache *cache, uint8 *key, void *value);
+void* putLRUCache(LRUCache *cache, uint8 *key, void *value);
 
 /**
  * 向LRU缓存中插入或更新一条数据
@@ -95,6 +96,14 @@ void* putLRUCacheWithHook(
  * @return {int8 *} value字节数组或者NULL
  */
 void *getLRUCache(LRUCache *cache, uint8 *key);
+
+/**
+ * 从LRU缓存中获取删除一对key
+ * @param cache 待操作的LRU缓存对象
+ * @param key 键
+ * @return {int8 *} 被移除的value字节数组或者NULL
+ */
+void *removeLRUCache(LRUCache *cache, uint8 *key);
 
 /*****************************************************************************
  * 私有且需要测试或在测试中要使用的函数

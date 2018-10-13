@@ -102,10 +102,8 @@ private void moveToFirst(LRUCache* cache, LRUNode* node){
 	insertLRUNode(cache->head, node);
 }
 
-/** 默认的淘汰钩子函数：释放内存 */
+/** 默认的淘汰钩子函数：什么都不做 */
 private void defaultEliminateHook(uint32 keyLen, uint8 *key, void *value) {
-	free(key);
-	free(value);
 }
 
 
@@ -140,23 +138,26 @@ LRUCache *makeLRUCache(uint32 capacity, uint32 keyLen){
 	return cache;
 }
 
-void putLRUCache(LRUCache *cache, uint8 *key, void *value){
-	putLRUCacheWithHook(cache, key, value, defaultEliminateHook);
+void* putLRUCache(LRUCache *cache, uint8 *key, void *value){
+	return putLRUCacheWithHook(cache, key, value, defaultEliminateHook);
 }
 
 void* putLRUCacheWithHook(
 LRUCache *cache,
-uint8 *key,
+uint8 *originKey,
 void *value,
 void (*hook)(uint32, uint8 *, void *)){
 	void* result =NULL;
-	uint32 hashcode = hashCode(key, cache->keyLen);
-	LRUNode* node = getFromHashTable(cache, key, hashcode);
+
+	uint32 hashcode = hashCode(originKey, cache->keyLen);
+	LRUNode* node = getFromHashTable(cache, originKey, hashcode);
 	if(node!=NULL){
 		free(node->value);
 		node->value=value;
 		moveToFirst(cache, node);
 	} else {
+		uint8 *key = (uint8 *)malloc(cache->keyLen);
+		memcpy(key, originKey, cache->keyLen);
 		if(cache->size>=cache->capacity){
 			//从hash表中删除最后一个元素
 			node = removeFromHashTable(
@@ -167,6 +168,8 @@ void (*hook)(uint32, uint8 *, void *)){
 			removeLRUNode(node);
 			//复用node节点
 			result = node->value;
+			//释放key内存
+			free(node->key);
 			//调用hook
 			if(hook!=NULL) hook(cache->keyLen, node->key, node->value);
 			//清理内存
@@ -192,4 +195,20 @@ void *getLRUCache(LRUCache *cache, uint8 *key){
 		return node->value;
 	}
 	return NULL;
+}
+
+void *removeLRUCache(LRUCache *cache, uint8 *key){
+	uint32 hashcode = hashCode(key, cache->keyLen);
+	LRUNode *node = removeFromHashTable(
+		cache,
+		key,
+		hashcode);
+	if(node==NULL){
+		return NULL;
+	}
+	removeLRUNode(node);
+	void *result = node->value;
+	free(node->key);
+	free(node);
+	return result;
 }

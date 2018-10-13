@@ -46,7 +46,7 @@ int32 batchInsertToArray(
 
 /**
  * 对二级及以上指针的操作，向数组array的index位置插入值value
- * 
+ * （恰巧可以对uint64的数组使用）
  * @param array 目标数组，拷贝到的位置
  * @param len   目标数组的最大长度，用于防止越界
  * @param index 插入的第一个元素所在的位置
@@ -79,6 +79,14 @@ int32 batchDeleteFromArray(
  * @return -1 index异常； 0 正常
  */
 int32 deleteFromArray(void** array, uint32 len, uint32 index);
+
+/**
+ * 申请内存并拷贝数组
+ * @param dest 目的
+ * @param src 源
+ * @param len 长度
+ */
+void newAndCopyByteArray(uint8 *dest, uint8 *src, uint32 len);
 
 /**
  * 创建一个List

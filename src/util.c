@@ -67,10 +67,19 @@ int32 deleteFromArray(void** array, uint32 len, uint32 index){
 }
 
 /*****************************************************************************
+ * newAndCopyByteArray
+ ******************************************************************************/
+void newAndCopyByteArray(uint8 *dest, uint8 *src, uint32 len){
+	dest = (uint8*) malloc(len);
+	memcpy(dest,src, len);
+}
+
+/*****************************************************************************
  * 链表操作
  ******************************************************************************/
 
-List *makeList(){
+List *makeList()
+{
 	List *result = (List *)malloc(sizeof(List));
 	result->head = result->tail = NULL;
 	result->length = 0;

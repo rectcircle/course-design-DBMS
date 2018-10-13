@@ -17,8 +17,8 @@ OBJ_DEBUG = $(patsubst %.c,${DIR_OBJ_BEBUG}/%.o,$(notdir ${SRC}))
 
 # 编译器配置
 CC = gcc
-CFLAGS = -std=c99 -Wall -I${DIR_INC}
-CFLAGS_DEBUG = -std=c99 -DPROFILE_TEST -g -Wall -I${DIR_INC}
+CFLAGS = -pthread -Wall -I${DIR_INC}
+CFLAGS_DEBUG = -pthread -DPROFILE_TEST -g -Wall -I${DIR_INC}
 
 #要构建的主程序名
 TARGET = $(patsubst %.c,%,$(notdir $(wildcard ${DIR_SRC_MAIN}/*.c)))
@@ -55,11 +55,11 @@ run-%: %
 
 #编译发行程序
 main-%:${OBJ} ${DIR_OBJ}/main-%.o
-	$(CC) $(OBJ) ${DIR_OBJ}/$@.o -o ${DIR_BIN}/$@
+	$(CC) $(CFLAGS) $(OBJ) ${DIR_OBJ}/$@.o -o ${DIR_BIN}/$@
 
 #测试程序，依赖于组件，输出到test
 test-%:${OBJ_DEBUG} ${DIR_OBJ_BEBUG}/test-%.o
-	$(CC) $(OBJ_DEBUG) ${DIR_OBJ_BEBUG}/$@.o -o ${DIR_BIN_BEBUG}/$@
+	$(CC) $(CFLAGS_DEBUG) $(OBJ_DEBUG) ${DIR_OBJ_BEBUG}/$@.o -o ${DIR_BIN_BEBUG}/$@
 
 # 编译src组件代码，不使用使用-g参数
 ${DIR_OBJ}/%.o:${DIR_SRC}/%.c

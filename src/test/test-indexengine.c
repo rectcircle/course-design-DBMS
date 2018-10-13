@@ -53,8 +53,6 @@ void testReadWriteMeta(){
 	assertlonglong(engine1->treeMeta.sqt, engine2->treeMeta.sqt, "treeMeta.sqt");
 	printf("nextNodeVersion=%lld %lld\n", engine1->nextNodeVersion, engine2->nextNodeVersion);
 	assertlonglong(engine1->nextNodeVersion, engine2->nextNodeVersion, "nextNodeVersion");
-	printf("leafMaxKVLen=%d %d\n", engine1->leafMaxKVLen, engine2->leafMaxKVLen);
-	assertlonglong(engine1->leafMaxKVLen, engine2->leafMaxKVLen, "leafMaxKVLen");
 	unlink(filename);
 }
 
