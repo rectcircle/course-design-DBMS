@@ -94,7 +94,7 @@ void* putLRUCacheWithHook(
  * @param key 键
  * @return {int8 *} value字节数组或者NULL
  */
-uint8 *getLRUCache(LRUCache *cache, uint8 *key);
+void *getLRUCache(LRUCache *cache, uint8 *key);
 
 /*****************************************************************************
  * 私有且需要测试或在测试中要使用的函数

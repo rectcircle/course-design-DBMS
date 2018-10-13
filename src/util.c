@@ -9,6 +9,7 @@
  ******************************************************************************/
 
 #include "util.h"
+#include <malloc.h>
 
 /*****************************************************************************
  * byteArrayCompare
@@ -63,4 +64,28 @@ int32 batchDeleteFromArray(void** array, uint32 len, uint32 index, uint32 delLen
  ******************************************************************************/
 int32 deleteFromArray(void** array, uint32 len, uint32 index){
 	return batchDeleteFromArray(array, len, index, 1);
+}
+
+/*****************************************************************************
+ * 链表操作
+ ******************************************************************************/
+
+List *makeList(){
+	List *result = (List *)malloc(sizeof(List));
+	result->head = result->tail = NULL;
+	result->length = 0;
+	return result;
+}
+
+void addList(List *list, void *value){
+	ListNode* q = (ListNode *)malloc(sizeof(ListNode));
+	q->value = value;
+	if(list->head ==NULL){
+		list->head = q;
+		list->tail = q;
+	} else {
+		list->tail->next = q;
+		list->tail = q;
+	}
+	list->length++;
 }

@@ -184,7 +184,7 @@ void (*hook)(uint32, uint8 *, void *)){
 	return result;
 }
 
-uint8 *getLRUCache(LRUCache *cache, uint8 *key){
+void *getLRUCache(LRUCache *cache, uint8 *key){
 	uint32 hashcode = hashCode(key, cache->keyLen);
 	LRUNode* node = getFromHashTable(cache, key, hashcode);
 	if(node!=NULL){

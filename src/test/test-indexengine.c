@@ -18,9 +18,9 @@ void debug(){
 void testReadWriteMeta(){
 	char* filename = "test.idx";
 	//od -t x1 test.idx
-	IndexEngine *engine1 = makeIndexEngine(filename, 1, 1, 0, 0);
+	IndexEngine *engine1 = makeIndexEngine(filename, 1, 1, 0, 0, 0);
 	close(engine1->fd);
-	IndexEngine *engine2 = loadIndexEngine(filename);
+	IndexEngine *engine2 = loadIndexEngine(filename, 0);
 	printf("count=%lld %lld\n", engine1->count, engine2->count);
 	assertlonglong(engine1->count, engine2->count, "count");
 	printf("filename=%s %s\n", engine1->filename, engine2->filename);
@@ -51,6 +51,10 @@ void testReadWriteMeta(){
 	assertlonglong(engine1->treeMeta.root, engine2->treeMeta.root, "treeMeta.root");
 	printf("sqt=%lld %lld\n", engine1->treeMeta.sqt, engine2->treeMeta.sqt);
 	assertlonglong(engine1->treeMeta.sqt, engine2->treeMeta.sqt, "treeMeta.sqt");
+	printf("nextNodeVersion=%lld %lld\n", engine1->nextNodeVersion, engine2->nextNodeVersion);
+	assertlonglong(engine1->nextNodeVersion, engine2->nextNodeVersion, "nextNodeVersion");
+	printf("leafMaxKVLen=%d %d\n", engine1->leafMaxKVLen, engine2->leafMaxKVLen);
+	assertlonglong(engine1->leafMaxKVLen, engine2->leafMaxKVLen, "leafMaxKVLen");
 	unlink(filename);
 }
 

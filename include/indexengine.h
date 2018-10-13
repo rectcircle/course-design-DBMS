@@ -144,12 +144,16 @@ typedef struct IndexEngine {
 	uint32 pageSize;
 	/** 标志使用IS_XXX的宏获取具体标志 */
 	uint32 flag;
+	/** （不需要持久化）叶子节点一个页最长可以放多少对KV */
+	uint32 leafMaxKVLen;
 	/** 下一个可用⻚的号 */
 	uint64 nextPageId;
 	/** [1, nextPageId) 已将使用的⻚的数目,结合 nextPageId 在达到一定情况下进行自动磁盘整理 */
 	uint64 usedPageCnt;
 	/** 该索引数据计数(共多少条数据) */
 	uint64 count;
+	/** 下一个持久化版本号 */
+	uint64 nextNodeVersion;
 	/** 运行时缓存 */
 	struct IndexCache cache;
 	/** B+树的元数据 */
@@ -163,7 +167,7 @@ typedef struct IndexTreeNode
 {
 	/** 该节点在磁盘的页面号 */
 	uint64 pageId;
-	/** 若该页被修改，该字段有效*/
+	/** 若该页被修改或新建，该字段有效*/
 	uint64 newPageId;
 	/** 该页的类型，类型参见NODE_TYPE_XXX宏 */
 	uint8 type;
@@ -177,6 +181,10 @@ typedef struct IndexTreeNode
 	uint64 effect;
 	/** 当前页为叶子节点页，指向下一个数据页所在的位置 */
 	uint64 after;
+	/** 当前节点的持久化版本号 */
+	uint64 nodeVersion;
+	/** type为NODE_TYPE_LEAF_NO_META时有效，该节点中kv对数目 */
+	uint32 kvLength;
 	/** 节点状态：参见NODE_STATUS_XXX 宏 */
 	int32 status;
 	/** 
@@ -212,7 +220,7 @@ typedef struct IndexTreeNode
  * @param key 要查找的key
  * @return {uint8*} 带长度的数组类型
  */
-Array *searchIndexEngine(IndexEngine *engine, uint8 *key);
+List *searchIndexEngine(IndexEngine *engine, uint8 *key);
 
 /**
  * 向BTree添加添加一条记录
@@ -384,6 +392,15 @@ uint64 readPageIndexFile(IndexEngine *engine, uint64 pageId, char *buffer, uint3
  */
 IndexTreeNode *getTreeNodeByPageId(IndexEngine *engine, uint64 pageId, int32 nodeType);
 
+/**
+ * 从缓存或磁盘中获取一个有效节点
+ * 调用`getTreeNodeByPageId`函数
+ * @param engine IndexEngine
+ * @param pageId 页号
+ * @param nodeType 节点类型
+ * @return {IndexTreeNode *} 可用的IndexTreeNode
+ */
+IndexTreeNode *getEffectiveTreeNodeByPageId(IndexEngine *engine, uint64 pageId, int32 nodeType);
 #endif
 
 #endif

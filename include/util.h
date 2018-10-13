@@ -80,6 +80,18 @@ int32 batchDeleteFromArray(
  */
 int32 deleteFromArray(void** array, uint32 len, uint32 index);
 
+/**
+ * 创建一个List
+ * @return {List*} 一个可用链表
+ */
+List* makeList();
+
+/**
+ * 向链表中插入一个元素
+ * @param list 一个链表
+ * @param value 值
+ */
+void addList(List* list, void* value);
 
 /**
  * 64位整形字节序转换
