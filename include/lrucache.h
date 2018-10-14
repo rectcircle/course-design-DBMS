@@ -105,17 +105,23 @@ void *getLRUCache(LRUCache *cache, uint8 *key);
  */
 void *removeLRUCache(LRUCache *cache, uint8 *key);
 
+/**
+ * 清空一个缓存
+ * @param cache 待操作的LRU缓存对象
+ */
+void clearLRUCache(LRUCache *cache);
+
 /*****************************************************************************
  * 私有且需要测试或在测试中要使用的函数
  ******************************************************************************/
 #ifdef PROFILE_TEST
-/**
+	/**
  * 创建一个LRU节点，用来存放数据
  * @param key 键
  * @param value 值
  * @return {LRUNode} 一个可用LRU节点
  */
-LRUNode *makeLRUNode(uint8 *key, void *value);
+	LRUNode *makeLRUNode(uint8 *key, void *value);
 #endif
 
 

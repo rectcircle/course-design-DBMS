@@ -68,8 +68,8 @@
  */
 /** 没有正常状态 */
 #define CACHE_STATUS_NORMAL 0
-/** 正在进行Freeze和Work切换 */
-#define CACHE_STATUS_SWITCH_CHANGE 1
+// /** 正在进行Freeze和Work切换 */
+// #define CACHE_STATUS_SWITCH_CHANGE 1
 /** 正在进行持久化 */
 #define CACHE_STATUS_PERSISTENCE 2
 
@@ -125,11 +125,13 @@ typedef struct IndexCache{
 	/** 缓存状态 */
 	volatile int32 status;
 	/** 条件变量，用于控制并发 */
-	pthread_cond_t statusCond;
+	pthread_cond_t* statusCond;
 	/** 用于互斥更改状态 */
-	pthread_mutex_t statusMutex;
+	pthread_mutex_t* statusMutex;
 	/** 设置成可重入 */
-	pthread_mutexattr_t statusAttr;
+	pthread_mutexattr_t* statusAttr;
+	/** 持久化线程 */
+	pthread_t* persistenceThread;
 } IndexCache;
 
 /**
@@ -262,7 +264,7 @@ int32 updateIndexEngine(IndexEngine *engine, uint8 *key, uint8 *oldValue, uint8 
  * @param isUnique 是否唯一
  * @param keyLen 键字节数
  * @param valueLen 值字节数
- * @param maxHeapSize 最大堆内存大小 0 表示96M
+ * @param maxHeapSize 最大堆内存大小 0 表示96M，仅仅是个建议可能超过
  * @return 一个可用的 索引引擎指针，参数异常，返回NULL
  */
 IndexEngine *makeIndexEngine(
@@ -277,7 +279,7 @@ IndexEngine *makeIndexEngine(
  * 从文件系统加载一个索引引擎，文件不存在返回NULL
  * 会进行启动检查，恢复状态
  * @param filename 文件路径
- * @param maxHeapSize 最大堆内存大小 0 表示96M
+ * @param maxHeapSize 最大堆内存大小 0 表示96M，仅仅是个建议可能超过
  * @return 一个可用的 索引引擎指针，文件不存在返回NULL
  */
 IndexEngine *loadIndexEngine(char *filename, uint64 maxHeapSize);
@@ -288,6 +290,7 @@ IndexEngine *loadIndexEngine(char *filename, uint64 maxHeapSize);
 
 /**
  * 刷磁盘，持久化操作
+ * @param engine 创建来的是一个备份，最后会free掉
  */
 void flushIndexEngine(IndexEngine *engine);
 
@@ -379,6 +382,59 @@ uint64 writePageIndexFile(IndexEngine *engine, uint64 pageId, char *buffer, uint
  * @param len 读的长度
  */
 uint64 readPageIndexFile(IndexEngine *engine, uint64 pageId, char *buffer, uint32 len);
+
+/**
+ * 向文件指定位置(position)开始写数据，写的数据必须是基本数据类型，自动进行大小端转换
+ * @param engine IndexEngine
+ * @param position 相对于文件首部的偏移量
+ * @param dest 待写入的数据指针
+ * @param len dest的长度，可选2,4,8
+ * @return 写的长度
+ */
+uint32 writeTypePosition(IndexEngine *engine, uint64 position, void *dest, uint32 len);
+
+/**
+ * 从文指定位置(position)开始读数据，读的数据必须是基本数据类型，自动进行大小端转换，放到dest指针内
+ * @param engine IndexEngine
+ * @param position 相对于文件首部的偏移量
+ * @param dest 读取数据后存放的指针
+ * @param len dest的长度，可选2,4,8
+ * @return 写的长度
+ */
+uint32 readTypePosition(IndexEngine *engine, uint64 position, void *dest, uint32 len);
+
+/**
+ * 向文件指定位置(position)开始写数据，写len个长度
+ * @param engine IndexEngine
+ * @param position 相对于文件首部的偏移量
+ * @param dest 待写入的数据指针
+ * @param len dest的长度任意正整数
+ * @return 写的长度
+ */
+uint32 writeArrayPosition(IndexEngine *engine, uint64 position, char *dest, uint32 len);
+
+/**
+ * 从文指定位置(position)开始读数据，读len个长度到dest里
+ * @param engine IndexEngine
+ * @param position 相对于文件首部的偏移量
+ * @param dest 读取数据后存放的指针
+ * @param len dest的长度任意正整数
+ * @return 写的长度
+ */
+uint32 readArrayPosition(IndexEngine *engine, uint64 position, char *dest, uint32 len);
+
+/**
+ * 读取元数据中的备份数据
+ * @param engine IndexEngine 现存的引擎，用于获取fd
+ * @return {IndexEngine*} 填充备份相关的字段的一个引擎结构
+ */
+IndexEngine* readMetaBackData(IndexEngine *engine);
+
+/**
+ * 将磁盘中的相关字段拷贝到备份字段
+ * @param engine IndexEngine 现存的引擎，用于获取fd，实际写入的不是其中的内容
+ */
+void writeMetaBackData(IndexEngine *engine);
 
 /**
  * 从缓存或磁盘中读区一个节点

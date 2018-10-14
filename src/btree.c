@@ -77,6 +77,7 @@ BTree *makeBTree(uint32 degree, uint32 keyLen, uint32 valueLen, int8 isUnique){
 	//度小于3将会退化为链表，不允许创建
 	if(degree<3) return NULL;
 	BTree *config = (BTree *)malloc(sizeof(BTree));
+	memset(config, 0, sizeof(BTree));
 	config->depth = 1;
 	config->degree = degree;
 	config->keyLen = keyLen;

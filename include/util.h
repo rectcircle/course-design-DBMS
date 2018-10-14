@@ -86,13 +86,18 @@ int32 deleteFromArray(void** array, uint32 len, uint32 index);
  * @param src 源
  * @param len 长度
  */
-void newAndCopyByteArray(uint8 *dest, uint8 *src, uint32 len);
+void newAndCopyByteArray(uint8 **dest, uint8 *src, uint32 len);
 
 /**
  * 创建一个List
  * @return {List*} 一个可用链表
  */
 List* makeList();
+
+/**
+ * 释放一个List的内存
+ */
+void freeList(List* list);
 
 /**
  * 向链表中插入一个元素

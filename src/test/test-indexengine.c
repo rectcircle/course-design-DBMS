@@ -10,13 +10,10 @@
 #include "util.h"
 #include "indexengine.h"
 
-void debug(){
-	printf("%d %d\n", 1, htonl(1));
-	printf("%lld %lld\n", 1ll, htonll(1ll));
-}
-
 void testReadWriteMeta(){
+	printf("====测试读写元数据====\n");
 	char* filename = "test.idx";
+	unlink(filename);
 	//od -t x1 test.idx
 	IndexEngine *engine1 = makeIndexEngine(filename, 1, 1, 0, 0, 0);
 	close(engine1->fd);
@@ -56,9 +53,47 @@ void testReadWriteMeta(){
 	unlink(filename);
 }
 
+void testInsertAndSearch(){
+	printf("====测试插入查询====\n");
+	char* filename = "test.idx";
+	unlink(filename);
+	// //度为6，每个缓存大小为3
+	// IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 1024);
+	//度为6，每个缓存大小为7
+	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 2048);
+	uint64 inputs[] = {1, 1, 3, 3, 5, 6, 7};
+	List* list = searchIndexEngine(engine, (uint8*)&(inputs[0]));
+	printf("列表长度=%d\n",list->length);
+	for(int i=0; i<sizeof(inputs)/sizeof(inputs[0]); i++){
+		insertIndexEngine(engine, (uint8*)&(inputs[i]),(uint8*)&(inputs[i]));
+		list = searchIndexEngine(engine, (uint8 *)&(inputs[i]));
+		printf("search key=%lld, value=%lld, length=%d\n", inputs[i], *(uint64*)list->head->value, list->length);
+	}
+	unlink(filename);
+}
+
+void testPersistenceThread(){
+	printf("====测试持久化====\n");
+	char* filename = "test.idx";
+	unlink(filename);
+	//度为6，每个缓存大小为3
+	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 1024);
+	uint64 inputs[] = {1, 2, 3, 4, 5, 6, 7};
+	List* list = searchIndexEngine(engine, (uint8*)&(inputs[0]));
+	printf("列表长度=%d\n",list->length);
+	for(int i=0; i<sizeof(inputs)/sizeof(inputs[0]); i++){
+		insertIndexEngine(engine, (uint8*)&(inputs[i]),(uint8*)&(inputs[i]));
+		list = searchIndexEngine(engine, (uint8 *)&(inputs[i]));
+		printf("search key=%lld, value=%lld, length=%d\n", inputs[i], *(uint64*)list->head->value, list->length);
+	}
+	pthread_join(engine->cache.persistenceThread, NULL);
+	unlink(filename);
+}
+
 TESTFUNC funcs[] = {
-	debug, 
-	testReadWriteMeta
+	testReadWriteMeta,
+	testInsertAndSearch,
+	testPersistenceThread
 };
 
 int main(int argc, char const *argv[])

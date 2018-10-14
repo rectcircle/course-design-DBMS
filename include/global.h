@@ -11,6 +11,8 @@
 #ifndef __GLOBAL_H__
 #define __GLOBAL_H__
 
+#define MAX_UINT32 0xffffffffu;
+
 typedef unsigned int uint32;
 typedef unsigned long long uint64;
 typedef unsigned char uint8;

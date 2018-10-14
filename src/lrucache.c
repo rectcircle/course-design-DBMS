@@ -64,6 +64,9 @@ private void insertToHashTable(LRUCache* cache, LRUNode* node, uint32 hashcode){
 private LRUNode *removeFromHashTable(LRUCache *cache, uint8 *key, uint32 hashcode){
 	uint32 index = hashcode & (cache->bucketCapacity - 1);
 	LRUNode* p = cache->table[index];
+	if(p==NULL){
+		return NULL;
+	}
 	//p第一个位置
 	if(p!=NULL && byteArrayCompare(cache->keyLen, key, p->key)==0){
 		cache->table[index] = p->after;
@@ -130,7 +133,7 @@ LRUCache *makeLRUCache(uint32 capacity, uint32 keyLen){
 	//其他值初始化
 	cache->size = 0;
 	cache->keyLen = keyLen;
-	cache->table = (LRUNode**)malloc(sizeof(LRUNode*)*bucketCapacity);
+	cache->table = (LRUNode**)calloc(bucketCapacity, sizeof(LRUNode*));
 	//为了方便编程，创建一个头结点
 	cache->head = makeLRUNode(NULL, NULL);
 	cache->head->prev = cache->head;
@@ -152,7 +155,6 @@ void (*hook)(uint32, uint8 *, void *)){
 	uint32 hashcode = hashCode(originKey, cache->keyLen);
 	LRUNode* node = getFromHashTable(cache, originKey, hashcode);
 	if(node!=NULL){
-		free(node->value);
 		node->value=value;
 		moveToFirst(cache, node);
 	} else {
@@ -210,5 +212,21 @@ void *removeLRUCache(LRUCache *cache, uint8 *key){
 	void *result = node->value;
 	free(node->key);
 	free(node);
+	cache->size--;
 	return result;
+}
+
+void clearLRUCache(LRUCache *cache){
+	LRUNode* next = cache->head->next;
+	LRUNode* node = NULL;
+	while((node=next)!=cache->head){
+		next = node->next;
+		free(node->key);
+		free(node);
+	}
+	//重新设置头指针
+	node->next = node;
+	node->prev = node;
+	//table清零
+	memset(cache->table, 0, cache->bucketCapacity * sizeof(LRUNode *));
 }
