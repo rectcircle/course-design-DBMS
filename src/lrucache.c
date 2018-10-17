@@ -30,12 +30,9 @@ private uint32 hashCode(uint8 *key, uint32 keyLen){
 }
 
 private LRUNode *makeLRUNode(uint8 *key, void *value){
-	LRUNode *node = (LRUNode *)malloc(sizeof(LRUNode));
+	LRUNode *node = (LRUNode *)calloc(1, sizeof(LRUNode));
 	node->key = key;
 	node->value = value;
-	node->prev = NULL;
-	node->next = NULL;
-	node->after = NULL;
 	return node;
 }
 
@@ -141,6 +138,13 @@ LRUCache *makeLRUCache(uint32 capacity, uint32 keyLen){
 	return cache;
 }
 
+void freeLRUCache(LRUCache *cache){
+	clearLRUCache(cache);
+	free(cache->table);
+	free(cache->head);
+	free(cache);
+}
+
 void* putLRUCache(LRUCache *cache, uint8 *key, void *value){
 	return putLRUCacheWithHook(cache, key, value, defaultEliminateHook);
 }
@@ -229,4 +233,5 @@ void clearLRUCache(LRUCache *cache){
 	node->prev = node;
 	//table清零
 	memset(cache->table, 0, cache->bucketCapacity * sizeof(LRUNode *));
+	cache->size=0;
 }

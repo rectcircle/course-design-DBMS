@@ -25,8 +25,9 @@ void test2(){
 
 uint64 arr[10] = {0, 1, 2, 3, 0};
 void fun(){
-	uint64 value = 4;
+	uint64 value = 267;
 	insertToArray((void **)arr, 10, 4, (void *)value);
+	value=10;
 }
 
 void test3()

@@ -22,24 +22,6 @@ typedef char int8;
 typedef int int32;
 typedef short int16;
 typedef long long int64;
-typedef struct Array
-{
-	void *array;
-	int32 length;
-} Array;
-
-typedef struct ListNode
-{
-	void *value;
-	struct ListNode *next;
-} ListNode;
-typedef struct List
-{
-	struct ListNode *head;
-	struct ListNode *tail;
-	int32 length;
-} List;
-
 #ifdef PROFILE_TEST
 #define private extern
 #else

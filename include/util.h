@@ -15,6 +15,32 @@
 #include <string.h>
 #include <arpa/inet.h>
 
+/*****************************************************************************
+ * 结构定义
+ ******************************************************************************/
+
+typedef struct Array
+{
+	void *array;
+	int32 length;
+} Array;
+
+typedef struct ListNode
+{
+	void *value;
+	struct ListNode *next;
+} ListNode;
+typedef struct List
+{
+	struct ListNode *head;
+	struct ListNode *tail;
+	int32 length;
+} List;
+
+/*****************************************************************************
+ * 数组操作
+ ******************************************************************************/
+
 /**
  * 字节数组的比较大小
  * @param len 待比较两个字节数组的长度
@@ -28,7 +54,8 @@ int32 byteArrayCompare(uint32 len, uint8 *a, uint8 *b);
 
 /**
  * 批量拷贝：
- * 对二级及以上指针的操作
+ * 对二级及指针的操作为浅拷贝
+ * 对uint64数组操作为深拷贝
  * 将srcArray的前srcLen个元素插入到destArray的index及之后
  * 最后destArray数组的最后srcLen个元素将会被抛弃
  * 
@@ -46,7 +73,8 @@ int32 batchInsertToArray(
 
 /**
  * 对二级及以上指针的操作，向数组array的index位置插入值value
- * （恰巧可以对uint64的数组使用）
+ * 对二级及指针的操作为浅拷贝
+ * 对uint64数组操作为深拷贝
  * @param array 目标数组，拷贝到的位置
  * @param len   目标数组的最大长度，用于防止越界
  * @param index 插入的第一个元素所在的位置
@@ -88,6 +116,10 @@ int32 deleteFromArray(void** array, uint32 len, uint32 index);
  */
 void newAndCopyByteArray(uint8 **dest, uint8 *src, uint32 len);
 
+/*****************************************************************************
+ * 简单容器使用
+ ******************************************************************************/
+
 /**
  * 创建一个List
  * @return {List*} 一个可用链表
@@ -105,6 +137,10 @@ void freeList(List* list);
  * @param value 值
  */
 void addList(List* list, void* value);
+
+/*****************************************************************************
+ * 宏函数
+ ******************************************************************************/
 
 /**
  * 64位整形字节序转换

@@ -94,7 +94,7 @@ void freeList(List *list){
 }
 
 void addList(List *list, void *value){
-	ListNode* q = (ListNode *)malloc(sizeof(ListNode));
+	ListNode* q = (ListNode *)calloc(1, sizeof(ListNode));
 	q->value = value;
 	if(list->head ==NULL){
 		list->head = q;

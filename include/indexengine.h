@@ -1,7 +1,22 @@
 /*****************************************************************************
  * Copyright (c) 2018, rectcircle. All rights reserved.
  * 
- * @filename: indexengine.h 
+ * 实现一个B+树实现的索引引擎，支持如下内容：
+ * 创建或加载一个索引引擎
+ * 对数据进行增删改查
+ * 启动故障检测数据恢复
+ * 支持读写分离
+ * 
+ * 一些限制：
+ * key和value固定大小，内部储存无类型信息，类型信息需有调用者维护
+ * key仅支持字符串（不足keyLen的补`\0`），和无符号整型（必须手动转换为网络字节序）
+ * 建议使用uint64做value，这样空间利用率最大，效率最高
+ * 
+ * 内存管理方式，主要针对IndexTreeNode：
+ * IndexTreeNode中的key和value及返回的List内部的value都是拷贝
+ * 所以索引引擎内存管理完全自制，无需外部干涉
+ * 
+ * @filename: indexengine.h
  * @description: 索引存储引擎API
  * @author: Rectcircle
  * @version: 1.0
@@ -140,8 +155,10 @@ typedef struct IndexCache{
 typedef struct IndexEngine {
 	/** 索引文件位置 */
 	char* filename;
-	/** 索引文件描述符 */
-	int fd;
+	/** 索引文件描述符，用于写 */
+	int wfd;
+	/** 索引文件描述符，用于读 */
+	int rfd;
 	/** magic魔数 */
 	uint32 magic;
 	/** 文件版本 */
@@ -165,11 +182,11 @@ typedef struct IndexEngine {
 } IndexEngine;
 
 /**
- * 索引引擎的一个数据页
+ * 索引引擎的一个数据页（可能包含一个影子页）
  */
 typedef struct IndexTreeNode
 {
-	/** 该节点在磁盘的页面号 */
+	/** 该节点在磁盘的页面号，缓存中的Key */
 	uint64 pageId;
 	/** 若该页被修改或新建，该字段有效*/
 	uint64 newPageId;
@@ -179,10 +196,14 @@ typedef struct IndexTreeNode
 	uint32 size;
 	/** 标志使用IS_XXX的宏获取具体标志 */
 	uint32 flag;
-	/** 指向相邻节点的指针 */
+	/** 指向左兄弟的指针 */
+	uint64 prev;
+	/** 指向右兄弟的指针 */
 	uint64 next;
-	/** 若当前节点为废弃，此字段为指向有效节点的指针 */
-	uint64 effect;
+	// /** 指向有效节点的指针，pageId和newPageId二选一 */
+	// uint64 effect;
+	/** 指向影子节点的指针 */
+	uint64 after;
 	/** 当前节点的持久化版本号 */
 	uint64 nodeVersion;
 	/** 节点状态：参见NODE_STATUS_XXX 宏 */
@@ -203,7 +224,6 @@ typedef struct IndexTreeNode
 	 * 数组的长度为：BTree.degree+1
 	 */
 	uint8 **values;
-
 } IndexTreeNode;
 
 /*****************************************************************************
@@ -292,7 +312,7 @@ IndexEngine *loadIndexEngine(char *filename, uint64 maxHeapSize);
  * 刷磁盘，持久化操作
  * @param engine 创建来的是一个备份，最后会free掉
  */
-void flushIndexEngine(IndexEngine *engine);
+void flushIndexEngine(IndexEngine **engines);
 
 /**
  * 文件碎片整理
@@ -437,8 +457,8 @@ IndexEngine* readMetaBackData(IndexEngine *engine);
 void writeMetaBackData(IndexEngine *engine);
 
 /**
- * 从缓存或磁盘中读区一个节点
- * 此函数非常重要，涉及淘汰，启动持久化线程等工作
+ * 从缓存或磁盘中读取一个节点
+ * 此函数非常重要
  * @param engine IndexEngine
  * @param pageId 页号
  * @param nodeType 节点类型
@@ -452,9 +472,15 @@ IndexTreeNode *getTreeNodeByPageId(IndexEngine *engine, uint64 pageId, int32 nod
  * @param engine IndexEngine
  * @param pageId 页号
  * @param nodeType 节点类型
+ * @param parentPageId 父节点页号
+ * @param index pageId在父节点孩子指针数据的下标
  * @return {IndexTreeNode *} 可用的IndexTreeNode
  */
-IndexTreeNode *getEffectiveTreeNodeByPageId(IndexEngine *engine, uint64 pageId, int32 nodeType);
+IndexTreeNode *getEffectiveTreeNodeByPageId(IndexEngine *engine, uint64 pageId, int32 nodeType, uint64 parentPageId, int32 index);
+/**
+ * 持久化断电测试用变量
+ */
+extern int persistenceExceptionId;
 #endif
 
 #endif
