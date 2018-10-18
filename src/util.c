@@ -84,6 +84,9 @@ List *makeList()
 }
 
 void freeList(List *list){
+	if(list==NULL){
+		return;
+	}
 	ListNode *node = NULL;
 	ListNode *tmp = list->head;
 	while ((node=tmp)!=NULL){
@@ -104,4 +107,41 @@ void addList(List *list, void *value){
 		list->tail = q;
 	}
 	list->length++;
+}
+
+void addListToList(List *dest, List *src){
+	if(dest==NULL||src==NULL){
+		return;
+	}
+	if(dest->length==0){
+		if(src->length!=0){
+			dest->head = src->head;
+			dest->tail = src->tail;
+			dest->length = src->length;
+		}
+	} else {
+		if(src->length!=0){
+			dest->tail->next = src->head;
+			dest->tail = src->tail;
+			dest->length += src->length;
+		}
+	}
+	src->head = src->tail = NULL;
+	src->length = 0;
+}
+
+void *removeHeadList(List *list){
+	void * value;
+	if(list->length==0){
+		return NULL;
+	}
+	ListNode *node = list->head;
+	value = node->value;
+	list->head = node->next;
+	if(list->head==NULL){
+		list->tail = NULL;
+	}
+	list->length--;
+	free(node);
+	return value;
 }

@@ -132,11 +132,25 @@ List* makeList();
 void freeList(List* list);
 
 /**
- * 向链表中插入一个元素
+ * 向链表末位插入一个元素
  * @param list 一个链表
  * @param value 值
  */
 void addList(List* list, void* value);
+
+/**
+ * 向链表末位插入一个链表，并清空原有链表
+ * @param dest 被插入的链表
+ * @param src 数据提供者，会清空
+ */
+void addListToList(List* dest, List* src);
+
+/**
+ * 删除链表的第一个元素
+ * @param list 一个链表
+ * @return 返回value值
+ */
+void *removeHeadList(List *list);
 
 /*****************************************************************************
  * 宏函数

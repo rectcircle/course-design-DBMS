@@ -194,8 +194,8 @@ void testPersistenceException(){
 TESTFUNC funcs[] = {
 	testReadWriteMeta,
 	testInsertAndSearch,
-	// testPersistenceThread,
-	testPersistenceException,
+	testPersistenceThread,
+	// testPersistenceException,
 };
 
 int main(int argc, char const *argv[])

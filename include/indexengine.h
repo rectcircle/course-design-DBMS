@@ -137,6 +137,10 @@ typedef struct IndexCache{
 	struct LRUCache *changeCacheWork;
 	/** 存放与磁盘不一致的页用于持久化 */
 	struct LRUCache *changeCacheFreeze;
+	/** 废弃的影子页：不为NULL从里取页号，为从engine->nextPageId变量分配 */
+	struct List* abandonedPageWork;
+	/** 废弃的影子页：废弃影子页插入，当每次持久化结束后交换加入abandonedPageWork，清空 */
+	struct List *abandonedPageFreeze;
 	/** 缓存状态 */
 	volatile int32 status;
 	/** 条件变量，用于控制并发 */
@@ -169,7 +173,7 @@ typedef struct IndexEngine {
 	uint32 flag;
 	/** 下一个可用⻚的号 */
 	uint64 nextPageId;
-	/** [1, nextPageId) 已将使用的⻚的数目,结合 nextPageId 在达到一定情况下进行自动磁盘整理 */
+	/** [1, nextPageId) B+树节点计数（链接页和影子页算一个） */
 	uint64 usedPageCnt;
 	/** 该索引数据计数(共多少条数据) */
 	uint64 count;
@@ -303,6 +307,12 @@ IndexEngine *makeIndexEngine(
  * @return 一个可用的 索引引擎指针，文件不存在返回NULL
  */
 IndexEngine *loadIndexEngine(char *filename, uint64 maxHeapSize);
+
+/**
+ * 释放一个IndexEngine的内存
+ * @param engine 创建来的是一个备份，最后会free掉
+ */
+void freeIndexEngine(IndexEngine * engine);
 
 /*****************************************************************************
  * 辅助函数

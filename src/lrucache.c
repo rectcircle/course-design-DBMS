@@ -139,6 +139,9 @@ LRUCache *makeLRUCache(uint32 capacity, uint32 keyLen){
 }
 
 void freeLRUCache(LRUCache *cache){
+	if(cache==NULL){
+		return;
+	}
 	clearLRUCache(cache);
 	free(cache->table);
 	free(cache->head);
