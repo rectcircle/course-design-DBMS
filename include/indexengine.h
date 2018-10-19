@@ -235,12 +235,12 @@ typedef struct IndexTreeNode
  ******************************************************************************/
 
 /*****************************************************************************
- * 增删改查
+ * 增删查（改通过查删增实现）
  ******************************************************************************/
 
 /**
  * 从索引引擎中查找key对应的value，可能有多个
- * @param engine 合法的B+树
+ * @param engine IndexEngine
  * @param key 要查找的key
  * @return {uint8*} 带长度的数组类型
  */
@@ -249,8 +249,8 @@ List *searchIndexEngine(IndexEngine *engine, uint8 *key);
 /**
  * 向BTree添加添加一条记录
  * 注意：不会进行重复判断，直接插入
- * 若想抱枕KV严格不重复（同一对KV在树中唯一），请先使用update，若返回0再进行插入
- * @param config 合法的B+树
+ * 若想保证KV严格不重复（同一对KV在树中唯一），请先使用update，若返回0再进行插入
+ * @param engine IndexEngine
  * @param key 要插入的key
  * @param value 要插入的value
  * @return {int32} -1 插入失败，1 表示插入成功
@@ -259,22 +259,12 @@ int32 insertIndexEngine(IndexEngine *engine, uint8 *key, uint8 *value);
 
 /**
  * 从BTree中删除记录
- * @param config 合法的B+树
+ * @param engine IndexEngine
  * @param key 要删除的key
  * @param value 要删除的value可为NULL，为NULL表示删除所有满足key的记录
  * @return {int32} 表示删除的记录数目
  */
 int32 removeIndexEngine(IndexEngine *engine, uint8 *key, uint8 *value);
-
-/**
- * 更新KV严格相等的valeu为newValue
- * @param config 合法的B+树
- * @param key 要更新的key
- * @param oldValue 要更新的之前的value
- * @param newValue 新的value
- * @return {int32} 0 没有选中的数据，1 更新成功
- */
-int32 updateIndexEngine(IndexEngine *engine, uint8 *key, uint8 *oldValue, uint8 *newValue);
 
 /*****************************************************************************
  * 文件操作

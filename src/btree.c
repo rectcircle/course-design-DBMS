@@ -359,6 +359,7 @@ int32 removeBTree(BTree *config, uint8 *key, uint8 *value){
 			config->depth--;
 		}
 	}
+	return removeCnt;
 }
 
 /*****************************************************************************
