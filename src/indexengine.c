@@ -51,6 +51,8 @@ private IndexTreeNode* makeIndexTreeNode(IndexEngine* engine, int32 nodeType){
 	return node;
 }
 
+static void putToAbandonedPageFreeze(IndexEngine* engine, uint64 pageId);
+
 /** 
  * 改变节点状态 参见《3-索引存储引擎》状态转换图
  * 如果从OLD转换为UPDATE，更新元数据
@@ -68,6 +70,9 @@ private void changeIndexTreeNodeStatus(IndexEngine* engine, IndexTreeNode* node,
 			}
 			node->nodeVersion = engine->nextNodeVersion;
 		} else if(nodeStatus==NODE_STATUS_REMOVE){
+			putToAbandonedPageFreeze(engine, node->pageId);
+			putToAbandonedPageFreeze(engine, node->newPageId);
+			engine->usedPageCnt--;
 			node->status = NODE_STATUS_REMOVE;
 		} else {
 		}
@@ -78,6 +83,9 @@ private void changeIndexTreeNodeStatus(IndexEngine* engine, IndexTreeNode* node,
 				node->after = node->newPageId;
 			}
 		} else if(nodeStatus==NODE_STATUS_REMOVE){
+			putToAbandonedPageFreeze(engine, node->pageId);
+			putToAbandonedPageFreeze(engine, node->newPageId);
+			engine->usedPageCnt--;
 			node->status = NODE_STATUS_REMOVE;
 		}
 	} else {
@@ -422,6 +430,15 @@ static void putTochangeCacheWork(IndexEngine* engine, IndexTreeNode* node){
 	putLRUCache(engine->cache.changeCacheWork, (uint8 *)&node->pageId, (void *)node);
 }
 
+/** 将pageId放入废弃页链表 */
+static void putToAbandonedPageFreeze(IndexEngine* engine, uint64 pageId){
+	if(pageId!=0){
+		void *abandonedPageId = malloc(sizeof(uint64));
+		memcpy(abandonedPageId, &pageId, sizeof(uint64));
+		addList(engine->cache.abandonedPageFreeze, abandonedPageId);
+	}
+}
+
 /** 检查进行持久化 */
 static void checkThreadPersistence(IndexEngine* engine){
 	//changeCacheWork满了
@@ -496,9 +513,7 @@ private IndexTreeNode* getTreeNodeByPageId(IndexEngine *engine, uint64 pageId, i
 					copyNode->pageId = result->pageId;
 					// copyNode->newPageId = result->after;
 					//添加到废弃链表
-					void* abandonedPageId = malloc(sizeof(uint64));
-					memcpy(abandonedPageId, &result->after, sizeof(uint64));
-					addList(engine->cache.abandonedPageFreeze, abandonedPageId);
+					putToAbandonedPageFreeze(engine, result->after);
 					copyNode->newPageId = 0;
 					copyNode->after = 0;
 					copyNode->status = NODE_STATUS_UPDATE;
@@ -580,10 +595,8 @@ private IndexTreeNode* getTreeNodeByPageId(IndexEngine *engine, uint64 pageId, i
 			// result->newPageId = result->after;
 			// result->after = nodes[0]->after;
 			//添加到废弃链表
-			void *abandonedPageId = malloc(sizeof(uint64));
-			memcpy(abandonedPageId, &result->after, sizeof(uint64));
 			pthread_mutex_lock(engine->cache.statusMutex);
-			addList(engine->cache.abandonedPageFreeze, abandonedPageId);
+			putToAbandonedPageFreeze(engine, result->after);
 			pthread_mutex_unlock(engine->cache.statusMutex);
 			result->newPageId = 0;
 			result->after = 0;
@@ -991,6 +1004,8 @@ static void mergeIndexTree(
 		batchInsertToArray((void**)idxNode->children, treeMeta->degree+1, idxLen, (void**)idx1Node->children, idx1Len);
 	idxNode->size = idxLen+idx1Len;
 	idxNode->next = idx1Node->next;
+	//清零，防止二次free key或value
+	idx1Node->size = 0;
 	//删除父亲中关于idx1的记录
 	deleteFromArray((void**)nowNode->keys, treeMeta->degree+1, index+1);
 	deleteFromArray((void**)nowNode->children, treeMeta->degree+1, index+1);
@@ -1037,7 +1052,7 @@ static int32 removeFrom(IndexEngine *engine, uint64 nowPageId, uint8 *key, uint8
 			now->size--;
 			removeCnt++;
 			//修改状态
-			changeIndexTreeNodeStatus(engine, now, NODE_STATUS_REMOVE);
+			changeIndexTreeNodeStatus(engine, now, NODE_STATUS_UPDATE);
 			putTochangeCacheWork(engine,now);
 			continue;
 		}
@@ -1054,7 +1069,14 @@ static int32 removeFrom(IndexEngine *engine, uint64 nowPageId, uint8 *key, uint8
 		IndexTreeNode *next = getTreeNodeByPageId(engine, nextPageId, nextNodeType);
 		//重新获取now防止被淘汰
 		now = getTreeNodeByPageId(engine, nowPageId, nodeType);
-		now->keys[index] = next->keys[0];
+		//判断是否要更新now指向next的key
+		if(byteArrayCompare(treeMeta->keyLen, now->keys[index],next->keys[0])!=0){
+			free(now->keys[index]);
+			newAndCopyByteArray(&now->keys[index], next->keys[0], treeMeta->keyLen);
+			// now->keys[index] = next->keys[0];
+			changeIndexTreeNodeStatus(engine, now, NODE_STATUS_UPDATE);
+			putTochangeCacheWork(engine, now);
+		}
 
 		//任然满足B+树的定义
 		if (next->size>=(treeMeta->degree+1)/2){
@@ -1065,9 +1087,9 @@ static int32 removeFrom(IndexEngine *engine, uint64 nowPageId, uint8 *key, uint8
 		if (index>0){
 			index--;
 		}
-		//相邻的两个孩子匀一匀可以满足B+树定义
 		IndexTreeNode *leftNode = getTreeNodeByPageId(engine, now->children[index], nextNodeType);
 		IndexTreeNode *rightNode = getTreeNodeByPageId(engine, now->children[index+1], nextNodeType);
+		//相邻的两个孩子匀一匀可以满足B+树定义
 		if((leftNode->size+rightNode->size)>=treeMeta->degree+1){
 			balanceIndexTree(engine, now, leftNode, rightNode,index, nextNodeType);
 			//说明根now->size没有发生变化，要恢复index
@@ -1144,7 +1166,7 @@ int32 removeIndexEngine(IndexEngine *engine, uint8 *key, uint8 *value){
 		int32 cnt = removeFrom(engine, engine->treeMeta.root, key, value, 1);
 		removeCnt += cnt;
 		if(cnt==0){
-			return removeCnt;
+			break;
 		}
 		IndexTreeNode* root = getTreeRootNode(engine);
 		if(root->size==1 && engine->treeMeta.depth>1){
@@ -1153,13 +1175,12 @@ int32 removeIndexEngine(IndexEngine *engine, uint8 *key, uint8 *value){
 			putTochangeCacheWork(engine, root);
 			//设置新的root
 			engine->treeMeta.root = root->children[0];
-			IndexTreeNode *newRoot = getTreeRootNode(engine);
-			changeIndexTreeNodeStatus(engine, newRoot, NODE_STATUS_UPDATE);
-			putTochangeCacheWork(engine, newRoot);
 			//深度--
 			engine->treeMeta.depth--;
 		}
 	}
+	engine->count -= removeCnt; //计数
+	checkThreadPersistence(engine);
 	return removeCnt;
 }
 
@@ -1257,7 +1278,7 @@ void flushIndexEngine(IndexEngine **engines){
 	char *buffer = (char *)malloc(engine->pageSize);
 	while((node=node->next)!=freezeCache->head){
 		IndexTreeNode *treeNode = (IndexTreeNode *)node->value;
-		if(treeNode->newPageId!=0){
+		if(treeNode->newPageId!=0 && treeNode->status!=NODE_STATUS_REMOVE){
 			nodeToBuffer(engine, treeNode, treeNode->type, buffer);
 			uint32 len = NODE_META_SIZE + treeNode->size * (
 				engine->treeMeta.keyLen +

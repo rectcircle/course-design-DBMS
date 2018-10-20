@@ -167,6 +167,7 @@ void persistenceException(int expId){
 		// freeList(list);
 	}
 	pthread_join(*engine->cache.persistenceThread, NULL);
+	persistenceExceptionId = 0;
 }
 void testPersistenceException(){
 	printf("====测试持久化断电情况：仅仅丢失最后一次持久化的数据====\n");
@@ -191,11 +192,105 @@ void testPersistenceException(){
 	}
 }
 
+void testRemove1(){
+	printf("====测试删除1====\n");
+	char *filename = "test.idx";
+	unlink(filename);
+	//度为6，每个缓存大小为3
+	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 1024);
+	uint64 data[] = {1, 2, 3, 4, 5, 6, 7, 8, 7, 3, 5, 8, 8, 1, 2, 4, 6, 8};
+	int8 ops[]   = {1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0};
+	//插入测试数据
+	for(int i=0; i<sizeof(data)/sizeof(data[0]); i++){
+		uint64 key = htonll(data[i]);
+		uint64 value = data[i];
+		if(ops[i]){
+			printf("insert key=%lld ", value);
+			insertIndexEngine(engine, (uint8 *)&key, (uint8 *)&(value));
+		} else {
+			int32 cnt = removeIndexEngine(engine, (uint8 *)&key, NULL);
+			printf("delete key=%lld cnt=%d ", value, cnt);
+			pthread_join(*engine->cache.persistenceThread, NULL);
+		}
+		List* list = searchIndexEngine(engine, (uint8 *)&key);
+		if(list->length==0){
+			printf("in tree value=NULL\n");
+		} else {
+			printf("in tree value=%lld\n", *(uint64*)list->head->value);
+		}
+	}
+	pthread_join(*engine->cache.persistenceThread, NULL);
+}
+
+void testRemove2(){
+	printf("====测试删除2====\n");
+	char *filename = "test.idx";
+	unlink(filename);
+	//度为6，每个缓存大小为3
+	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 1024);
+	uint64 data[] = {1, 1, 1, 1, 1, 1, 1, 1, 1};
+	int8 ops[]    = {1, 1, 1, 1, 1, 1, 1, 1, 0};
+	//插入测试数据
+	for(int i=0; i<sizeof(data)/sizeof(data[0]); i++){
+		uint64 key = htonll(data[i]);
+		uint64 value = data[i];
+		if(ops[i]){
+			printf("insert key=%lld ", value);
+			insertIndexEngine(engine, (uint8 *)&key, (uint8 *)&(value));
+		} else {
+			int32 cnt = removeIndexEngine(engine, (uint8 *)&key, NULL);
+			printf("delete key=%lld cnt=%d ", value, cnt);
+			pthread_join(*engine->cache.persistenceThread, NULL);
+		}
+		List* list = searchIndexEngine(engine, (uint8 *)&key);
+		if(list->length==0){
+			printf("in tree value=NULL\n");
+		} else {
+			printf("in tree value=%lld\n", *(uint64*)list->head->value);
+		}
+	}
+	pthread_join(*engine->cache.persistenceThread, NULL);
+}
+
+void testRemove3(){
+	printf("====测试删除3====\n");
+	char *filename = "test.idx";
+	unlink(filename);
+	//度为6，每个缓存大小为3
+	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 1024);
+	uint64 keys[]   = {1, 1, 1, 1, 1, 1, 1, 1, 1};
+	uint64 values[] = {1, 2, 3, 4, 5, 6, 7, 8, 3};
+	int8 ops[]      = {1, 1, 1, 1, 1, 1, 1, 1, 0};
+	//插入测试数据
+	for(int i=0; i<sizeof(keys)/sizeof(keys[0]); i++){
+		uint64 key = htonll(keys[i]);
+		uint64 value = values[i];
+		if(ops[i]){
+			printf("insert key=%lld ", value);
+			insertIndexEngine(engine, (uint8 *)&key, (uint8 *)&(value));
+		} else {
+			int32 cnt = removeIndexEngine(engine, (uint8 *)&key, (uint8 *)&value);
+			printf("delete key=%lld cnt=%d ", value, cnt);
+			pthread_join(*engine->cache.persistenceThread, NULL);
+		}
+		List* list = searchIndexEngine(engine, (uint8 *)&key);
+		if(list->length==0){
+			printf("in tree value=NULL\n");
+		} else {
+			printf("in tree value=%lld\n", *(uint64*)list->head->value);
+		}
+	}
+	pthread_join(*engine->cache.persistenceThread, NULL);
+}
+
 TESTFUNC funcs[] = {
-	testReadWriteMeta,
-	testInsertAndSearch,
-	testPersistenceThread,
+	// testReadWriteMeta,
+	// testInsertAndSearch,
+	// // testPersistenceThread,
 	// testPersistenceException,
+	testRemove1,
+	testRemove2,
+	testRemove3,
 };
 
 int main(int argc, char const *argv[])
