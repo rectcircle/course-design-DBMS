@@ -1205,7 +1205,7 @@ void flushIndexEngine(IndexEngine **engines){
 	char *buffer = (char *)malloc(engine->pageSize);
 	while((node=node->next)!=freezeCache->head){
 		IndexTreeNode *treeNode = (IndexTreeNode *)node->value;
-		if(treeNode->newPageId!=0){
+		if(treeNode->newPageId!=0 && treeNode->status!=NODE_STATUS_REMOVE){
 			nodeToBuffer(engine, treeNode, treeNode->type, buffer);
 			uint32 len = NODE_META_SIZE + treeNode->size * (
 				engine->treeMeta.keyLen +
