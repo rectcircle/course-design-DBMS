@@ -163,6 +163,10 @@ typedef struct IndexEngine {
 	int wfd;
 	/** 索引文件描述符，用于读 */
 	int rfd;
+	/** 当前正要写入的redo日志文件路径 */
+	char *redoLogFilename;
+	/** redo文件描述符 */
+	int redoLogFd;
 	/** magic魔数 */
 	uint32 magic;
 	/** 文件版本 */
