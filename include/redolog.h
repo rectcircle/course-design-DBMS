@@ -27,6 +27,17 @@
 #include <pthread.h>
 
 /*****************************************************************************
+ * 宏定义
+ ******************************************************************************/
+
+/** 插入操作 ，提供key,value*/
+#define OPERATETUPLE_TYPE_INSERT 1
+/** 删除操作，仅提供key */
+#define OPERATETUPLE_TYPE_REMOVE1 2
+/** 精确删除操作，提供key,value */
+#define OPERATETUPLE_TYPE_REMOVE2 3
+
+/*****************************************************************************
  * 枚举定义
  ******************************************************************************/
 
@@ -86,6 +97,7 @@ typedef struct RedoLog
 	struct List *operateList;
 	/** 重做元组状态 */
 	volatile enum RedoLogStatus status;
+	/** 持久化函数 */
 	void (*persistenceFunction)(int, struct OperateTuple*);
 	/** 条件变量，用于控制并发 */
 	pthread_cond_t statusCond;
@@ -153,5 +165,19 @@ void appendRedoLog(RedoLog *redoLog, OperateTuple* ops);
  * @param redoLog 一个可用的重做日志
  */
 void freeRedoLog(RedoLog *redoLog);
+
+/**
+ * 从文件中读取重做日志
+ * @param redoLog 一个可用的重做日志
+ * @return {List<OperateTuple>} 重做操作列表
+ */
+List *getOperateListFromFile(RedoLog *redoLog);
+
+/**
+ * 索引引擎持久化函数
+ * @param fd 文件描述符
+ * @param op 一个重做操作
+ */
+void indexEngineRedoLogPersistenceFunction(int fd, struct OperateTuple *op);
 
 #endif

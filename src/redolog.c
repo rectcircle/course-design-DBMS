@@ -14,14 +14,14 @@
 #include <stdarg.h>
 #include <unistd.h>
 
-/** 创建文件 */
+/** 创建文件：以O_APPEND方式 */
 static int createRedoLogFile(const char * filename){
-	return open(filename, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+	return open(filename, O_APPEND | O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 }
 
-/** 打开文件 */
+/** 打开文件：以O_APPEND方式 */
 static int openRedoLogFile(const char * filename){
-	return open(filename, O_RDWR);
+	return open(filename, O_APPEND | O_RDWR);
 }
 
 static void freeOperateTuple(OperateTuple *operateTuple){
@@ -39,11 +39,14 @@ void operateListForEach(void* value, void* args){
 /** 进行持久化 */
 void doPersistence(RedoLog *redoLog, List *operateList){
 	foreachList(operateList, operateListForEach, (void*)redoLog);
-	freeList(operateList);
+	clearList(operateList);
 }
 
 /** 检查是否需要进行持久化 */
 int checkNeedPersistence(RedoLog* redoLog){
+	if(redoLog->operateList->length==0){
+		return 0;
+	}
 	if (redoLog->flushStrategy == synchronize){
 		//同步策略：任何情况返回true
 		return 1;
@@ -85,6 +88,7 @@ static void persistenceTask(RedoLog* redoLog){
 
 		if(redoLog->status == persistence){
 			doPersistence(redoLog, operateList);
+			redoLog->lastFlushTime = currentTimeMillis();
 			if (redoLog->status == persistence){
 				redoLog->status = normal;
 			}
@@ -112,6 +116,7 @@ static RedoLog *initRedoLog(
 	redoLog->lastFlushTime = currentTimeMillis();
 	redoLog->operateList = makeList();
 	redoLog->status = normal;
+	redoLog->persistenceFunction = persistenceFunction;
 	//初始化线程相关内容
 	pthread_cond_init(&redoLog->statusCond, NULL);
 	pthread_mutexattr_init(&redoLog->statusAttr);
@@ -192,12 +197,13 @@ void appendRedoLog(RedoLog *redoLog, OperateTuple *ops){
 	}
 	if(redoLog->status != finish){
 		addList(redoLog->operateList, (void *)ops);
+		pthread_cond_signal(&redoLog->statusCond);
+		if (redoLog->flushStrategy == synchronize){
+			pthread_cond_wait(&redoLog->statusCond, &redoLog->statusMutex);
+		}
 	}
 	pthread_mutex_unlock(&redoLog->statusMutex);
 	pthread_cleanup_pop(0);
-	if (redoLog->status != finish){
-		pthread_cond_signal(&redoLog->statusCond);
-	}
 }
 
 void freeRedoLog(RedoLog *redoLog){
