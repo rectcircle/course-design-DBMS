@@ -10,6 +10,8 @@
 		"type_traits": "cpp",
 		"setjmp.h": "c",
 		"indexengine.h": "c",
-		"fcntl.h": "c"
+		"fcntl.h": "c",
+		"redolog.h": "c",
+		"stat.h": "c"
 	}
 }

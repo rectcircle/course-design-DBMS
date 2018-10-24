@@ -23,6 +23,8 @@
 
 #include "global.h"
 #include "util.h"
+#include <malloc.h>
+#include <pthread.h>
 
 /*****************************************************************************
  * 枚举定义
@@ -47,8 +49,6 @@ enum RedoFlushStrategy
 	/** 阈值策略 */
 	sizeThreshold
 };
-
-#define REDOLOG_STATUS_NORMAL 0
 
 /*****************************************************************************
  * 结构定义
@@ -80,12 +80,13 @@ typedef struct RedoLog
 	/** 当flushStrategy==definiteTime有效，表示倒计时的时间 */
 	/** 当flushStrategy==definiteTime有效，表示倒计时的时间 */
 	uint64 flushStrategyArg;
-	/** 上次持久化（或创建文件）的时间 */
+	/** 上次持久化（或创建文件）的时间：毫秒级时间戳 */
 	uint64 lastFlushTime;
-	/** 操作元组列表：操作中的元组 */
-	struct List *operateListWork;
+	/** 操作元组列表：操作中的元组List<OperateTuple*> */
+	struct List *operateList;
 	/** 重做元组状态 */
 	volatile enum RedoLogStatus status;
+	void (*persistenceFunction)(int, struct OperateTuple*);
 	/** 条件变量，用于控制并发 */
 	pthread_cond_t statusCond;
 	/** 用于互斥更改状态 */
@@ -100,21 +101,45 @@ typedef struct RedoLog
  * 公开API
  ******************************************************************************/
 
+/** 
+ * 创建一个OperateTuple
+ * @param type 操作类型
+ * @param {...} 可变参数操作对象
+ */
+OperateTuple *makeOperateTuple(uint8 type, ...);
+
+/**
+ * 释放OperateTuple，私有函数
+ */
+// void freeOperateTuple(OperateTuple * operateTuple);
+
 /**
  * 创建一个重做日志
  * @param filename 重做日志文件名
+ * @param persistenceFunction 一个函数，针对每一个操作日志记录做持久化
  * @param flushStrategy 刷磁盘策略
+ * @param flushStrategyArg 刷磁盘策略的参数
  * @return 一个可用的重做日志
  */
-RedoLog *makeRedoLog(char *filename, enum RedoFlushStrategy flushStrategy);
+RedoLog *makeRedoLog(
+	char *filename,
+	void (*persistenceFunction)(int, struct OperateTuple *),
+	enum RedoFlushStrategy flushStrategy,
+	uint64 flushStrategyArg);
 
 /**
  * 从磁盘中加载一个重做日志
  * @param filename 重做日志文件名
+ * @param persistenceFunction 一个函数，针对每一个操作日志记录做持久化
  * @param flushStrategy 刷磁盘策略
+ * @param flushStrategyArg 刷磁盘策略的参数
  * @return 一个可用的重做日志
  */
-RedoLog *loadRedoLog(char *filename, enum RedoFlushStrategy flushStrategy);
+RedoLog *loadRedoLog(
+	char *filename,
+	void (*persistenceFunction)(int, struct OperateTuple *),
+	enum RedoFlushStrategy flushStrategy,
+	uint64 flushStrategyArg);
 
 /**
  * 想重做日志中添加一个操作

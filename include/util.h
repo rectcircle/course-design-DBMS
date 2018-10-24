@@ -14,6 +14,7 @@
 #include "global.h"
 #include <string.h>
 #include <arpa/inet.h>
+#include <sys/time.h>
 
 /*****************************************************************************
  * 结构定义
@@ -132,6 +133,11 @@ List* makeList();
 void freeList(List* list);
 
 /**
+ * 清空一个List
+ */
+void clearList(List* list);
+
+/**
  * 向链表末位插入一个元素
  * @param list 一个链表
  * @param value 值
@@ -151,6 +157,23 @@ void addListToList(List* dest, List* src);
  * @return 返回value值
  */
 void *removeHeadList(List *list);
+
+/**
+ * 高阶函数foreach，遍历list中的每一个元素
+ * @param list 待操作List
+ * @param func 操作函数第一个参数为list中的value, 第二个参数为args
+ */
+void foreachList(List *list, void (*func)(void *, void *), void *args);
+
+/*****************************************************************************
+ * 时间函数
+ ******************************************************************************/
+
+/**
+ * 获取当前时刻时间戳（毫秒）
+ * @return 时间戳
+ */
+uint64 currentTimeMillis();
 
 /*****************************************************************************
  * 宏函数

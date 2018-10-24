@@ -84,6 +84,13 @@ List *makeList()
 }
 
 void freeList(List *list){
+	clearList(list);
+	if(list!=NULL){
+		free(list);
+	}
+}
+
+void clearList(List *list){
 	if(list==NULL){
 		return;
 	}
@@ -93,7 +100,8 @@ void freeList(List *list){
 		tmp = node->next;
 		free(node);
 	}
-	free(list);
+	list->tail = list->head = NULL;
+	list->length = 0;
 }
 
 void addList(List *list, void *value){
@@ -144,4 +152,25 @@ void *removeHeadList(List *list){
 	list->length--;
 	free(node);
 	return value;
+}
+
+void foreachList(List *list, void (*func)(void *, void*), void* args){
+	if(list==NULL || list->length==0){
+		return;
+	}
+	ListNode* node = list->head;
+	while(node!=NULL){
+		func(node->value, args);
+		node = node->next;
+	}
+}
+
+/*****************************************************************************
+ * 时间函数
+ ******************************************************************************/
+
+uint64 currentTimeMillis(){
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	return tv.tv_sec * 1000ull + tv.tv_usec / 1000;
 }
