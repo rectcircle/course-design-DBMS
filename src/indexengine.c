@@ -621,6 +621,83 @@ private IndexTreeNode* getTreeRootNode(IndexEngine *engine){
 }
 
 /*****************************************************************************
+ * 私有函数：重做日志相关内容
+ ******************************************************************************/
+
+static void operateTupleToBuffer(IndexEngine* indexEngine, OperateTuple* op, char* buffer){
+	int len = 0;
+	memcpy(buffer + len, &op->type, 1);
+	len+=1;
+	ListNode *node = op->objects->head;
+	uint32 lens[2] = {indexEngine->treeMeta.keyLen, indexEngine->treeMeta.valueLen};
+	int i=0;
+	while (node != NULL)
+	{
+		memcpy(buffer+len, node->value, lens[i]);
+		len+=lens[i];
+		i++;
+		node = node->next;
+	}
+}
+
+private void indexEngineRedoLogPersistenceFunction(RedoLog* redoLog, OperateTuple *op){
+	IndexEngine *indexEngine = (IndexEngine *)redoLog->env;
+	int len = 1 + indexEngine->treeMeta.keyLen;
+	if(op->objects->length==2){
+		len += indexEngine->treeMeta.valueLen;
+	}
+	char *buffer = malloc(len);
+	operateTupleToBuffer(indexEngine, op, buffer);
+	write(redoLog->fd, buffer, len);
+	free(buffer);
+}
+
+
+private List *getIndexEngineOperateList(RedoLog *redoLog){
+	List* list = makeList();
+	uint8 type = 0;
+	lseek(redoLog->fd, 0, SEEK_SET);
+	while(read(redoLog->fd, &type, 1)>0){
+		IndexEngine *indexEngine = (IndexEngine *)redoLog->env;
+		void *key = malloc(indexEngine->treeMeta.keyLen);
+		void *value = malloc(indexEngine->treeMeta.valueLen);
+
+		switch (type)
+		{
+			case 2:
+				if(read(redoLog->fd, key, indexEngine->treeMeta.keyLen)!=indexEngine->treeMeta.keyLen){
+					free(key);
+					free(value);
+					return list;
+				}
+				free(value);
+				addList(list, makeOperateTuple(type, key, value));
+				break;
+			case 1:
+			case 3:
+				if (read(redoLog->fd, key, indexEngine->treeMeta.keyLen) != indexEngine->treeMeta.keyLen){
+					free(key);
+					free(value);
+					return list;
+				}
+				if(read(redoLog->fd, value, indexEngine->treeMeta.valueLen)!=indexEngine->treeMeta.valueLen){
+					free(key);
+					free(value);
+					return list;
+				}
+				addList(list, makeOperateTuple(type, key, value));
+				break;
+			default:
+				free(key);
+				free(value);
+				return list;
+				break;
+		}
+	}
+	return list;
+}
+
+/*****************************************************************************
  * 公开API：文件操作
  ******************************************************************************/
 

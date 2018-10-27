@@ -38,6 +38,13 @@
 #define OPERATETUPLE_TYPE_REMOVE2 3
 
 /*****************************************************************************
+ * 类型定义
+ ******************************************************************************/
+struct RedoLog;		 //去除警告用
+struct OperateTuple; //去除警告用
+typedef void (*RedoPersistenceFunction)(struct RedoLog *, struct OperateTuple *);
+
+/*****************************************************************************
  * 枚举定义
  ******************************************************************************/
 
@@ -97,8 +104,10 @@ typedef struct RedoLog
 	struct List *operateList;
 	/** 重做元组状态 */
 	volatile enum RedoLogStatus status;
+	/** 环境，该重做日志工作对象：针对索引引擎还是hash引擎？ */
+	void* env;
 	/** 持久化函数 */
-	void (*persistenceFunction)(int, struct OperateTuple*);
+	void (*persistenceFunction)(struct RedoLog*, struct OperateTuple *);
 	/** 条件变量，用于控制并发 */
 	pthread_cond_t statusCond;
 	/** 用于互斥更改状态 */
@@ -135,7 +144,8 @@ OperateTuple *makeOperateTuple(uint8 type, ...);
  */
 RedoLog *makeRedoLog(
 	char *filename,
-	void (*persistenceFunction)(int, struct OperateTuple *),
+	void *env,
+	RedoPersistenceFunction persistenceFunction,
 	enum RedoFlushStrategy flushStrategy,
 	uint64 flushStrategyArg);
 
@@ -149,7 +159,8 @@ RedoLog *makeRedoLog(
  */
 RedoLog *loadRedoLog(
 	char *filename,
-	void (*persistenceFunction)(int, struct OperateTuple *),
+	void *env,
+	RedoPersistenceFunction persistenceFunction,
 	enum RedoFlushStrategy flushStrategy,
 	uint64 flushStrategyArg);
 
@@ -165,19 +176,5 @@ void appendRedoLog(RedoLog *redoLog, OperateTuple* ops);
  * @param redoLog 一个可用的重做日志
  */
 void freeRedoLog(RedoLog *redoLog);
-
-/**
- * 从文件中读取重做日志
- * @param redoLog 一个可用的重做日志
- * @return {List<OperateTuple>} 重做操作列表
- */
-List *getOperateListFromFile(RedoLog *redoLog);
-
-/**
- * 索引引擎持久化函数
- * @param fd 文件描述符
- * @param op 一个重做操作
- */
-void indexEngineRedoLogPersistenceFunction(int fd, struct OperateTuple *op);
 
 #endif

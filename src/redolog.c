@@ -32,7 +32,7 @@ static void freeOperateTuple(OperateTuple *operateTuple){
 void operateListForEach(void* value, void* args){
 	OperateTuple *operateTuple = (OperateTuple *)value;
 	RedoLog *redoLog = (RedoLog *)args;
-	redoLog->persistenceFunction(redoLog->fd, operateTuple);
+	redoLog->persistenceFunction(redoLog, operateTuple);
 	freeOperateTuple(operateTuple);
 }
 
@@ -103,7 +103,8 @@ static void persistenceTask(RedoLog* redoLog){
 /** 初始化一个RedoLog，不包括打开文件 */
 static RedoLog *initRedoLog(
 	char *filename,
-	void (*persistenceFunction)(int, struct OperateTuple *),
+	void *env,
+	RedoPersistenceFunction persistenceFunction,
 	enum RedoFlushStrategy flushStrategy,
 	uint64 flushStrategyArg)
 {
@@ -117,6 +118,7 @@ static RedoLog *initRedoLog(
 	redoLog->operateList = makeList();
 	redoLog->status = normal;
 	redoLog->persistenceFunction = persistenceFunction;
+	redoLog->env = env;
 	//初始化线程相关内容
 	pthread_cond_init(&redoLog->statusCond, NULL);
 	pthread_mutexattr_init(&redoLog->statusAttr);
@@ -164,26 +166,28 @@ OperateTuple *makeOperateTuple(uint8 type, ...){
 
 RedoLog *makeRedoLog(
 	char *filename,
-	void (*persistenceFunction)(int, struct OperateTuple *),
+	void *env,
+	RedoPersistenceFunction persistenceFunction,
 	enum RedoFlushStrategy flushStrategy,
 	uint64 flushStrategyArg)
 {
 	int fd = createRedoLogFile(filename);
 	if(fd<0) { return NULL; }
-	RedoLog *redoLog = initRedoLog(filename, persistenceFunction,flushStrategy, flushStrategyArg);
+	RedoLog *redoLog = initRedoLog(filename, env, persistenceFunction, flushStrategy, flushStrategyArg);
 	redoLog->fd = fd;
 	return redoLog;
 }
 
 RedoLog *loadRedoLog(
 	char *filename,
-	void (*persistenceFunction)(int, struct OperateTuple *),
+	void *env,
+	RedoPersistenceFunction persistenceFunction,
 	enum RedoFlushStrategy flushStrategy,
 	uint64 flushStrategyArg)
 {
 	int fd = openRedoLogFile(filename);
 	if(fd<0) { return NULL; }
-	RedoLog *redoLog = initRedoLog(filename, persistenceFunction,flushStrategy, flushStrategyArg);
+	RedoLog *redoLog = initRedoLog(filename, env, persistenceFunction, flushStrategy, flushStrategyArg);
 	redoLog->fd = fd;
 	return redoLog;
 }

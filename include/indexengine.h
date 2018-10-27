@@ -29,6 +29,7 @@
 #include "global.h"
 #include "util.h"
 #include "lrucache.h"
+#include "redolog.h"
 #include <fcntl.h>
 #include <unistd.h>
 #include <malloc.h>
@@ -471,20 +472,27 @@ void writeMetaBackData(IndexEngine *engine);
 IndexTreeNode *getTreeNodeByPageId(IndexEngine *engine, uint64 pageId, int32 nodeType);
 
 /**
- * 从缓存或磁盘中获取一个有效节点
- * 调用`getTreeNodeByPageId`函数
- * @param engine IndexEngine
- * @param pageId 页号
- * @param nodeType 节点类型
- * @param parentPageId 父节点页号
- * @param index pageId在父节点孩子指针数据的下标
- * @return {IndexTreeNode *} 可用的IndexTreeNode
- */
-IndexTreeNode *getEffectiveTreeNodeByPageId(IndexEngine *engine, uint64 pageId, int32 nodeType, uint64 parentPageId, int32 index);
-/**
  * 持久化断电测试用变量
  */
 extern int persistenceExceptionId;
+
+
+//重做日志相关业务函数
+
+/**
+ * 索引引擎持久化函数
+ * @param redoLog 文件描述符
+ * @param op 一个重做操作
+ */
+void indexEngineRedoLogPersistenceFunction(RedoLog *redoLog, OperateTuple *op);
+
+/**
+ * 从文件中读取重做日志
+ * @param redoLog 一个可用的重做日志
+ * @return {List<OperateTuple>} 重做操作列表
+ */
+List *getIndexEngineOperateList(RedoLog *redoLog);
+
 #endif
 
 #endif
