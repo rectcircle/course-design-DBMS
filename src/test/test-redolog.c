@@ -29,7 +29,7 @@ void demoPersistenceFunction(struct RedoLog* redoLog, struct OperateTuple *op){
 void testSynchronize(){
 	char* filename = "test.redolog";
 	unlink(filename);
-	RedoLog *redoLog = makeRedoLog(filename, NULL, (RedoPersistenceFunction)demoPersistenceFunction, synchronize, 0);
+	RedoLog *redoLog = makeRedoLog(filename, NULL, 0, (RedoPersistenceFunction)demoPersistenceFunction, synchronize, 0);
 	// pthread_join(redoLog->persistenceThread, NULL);
 	printf("===测试同步策略===\n");
 	uint64 inputs[] =  {1,2,3,4,5,6,7,8};
@@ -51,7 +51,8 @@ void testSynchronize(){
 void testDefiniteTime(){
 	char* filename = "test.redolog";
 	unlink(filename);
-	RedoLog *redoLog = makeRedoLog(filename, NULL, (RedoPersistenceFunction)demoPersistenceFunction, definiteTime, 3100);
+	uint64 operateListMaxSize = 100;
+	RedoLog *redoLog = makeRedoLog(filename, NULL, operateListMaxSize, (RedoPersistenceFunction)demoPersistenceFunction, definiteTime, 3100);
 	printf("===测试定时策略===\n");
 	uint64 inputs[] =  {1,2,3,4,5,6,7,8};
 	uint8 types[]  =   {1,2,3,1,2,3,3,3};
@@ -73,7 +74,8 @@ void testDefiniteTime(){
 void testSizeThreshold(){
 	char* filename = "test.redolog";
 	unlink(filename);
-	RedoLog *redoLog = makeRedoLog(filename, NULL, (RedoPersistenceFunction)demoPersistenceFunction, sizeThreshold, 3);
+	uint64 operateListMaxSize = 100;
+	RedoLog *redoLog = makeRedoLog(filename, NULL, operateListMaxSize, (RedoPersistenceFunction) demoPersistenceFunction, sizeThreshold, 3);
 	printf("===测试阈值策略===\n");
 	uint64 inputs[] =  {1,2,3,4,5,6,7,8};
 	uint8 types[]  =   {1,2,3,1,2,3,3,3};
@@ -100,8 +102,8 @@ void testPersistence(){
 	unlink(indexFilename);
 	//度为6，每个缓存大小为3
 	IndexEngine *engine = makeIndexEngine(indexFilename, 8, 8, 136, 0, 1024);
-
-	RedoLog *redoLog = makeRedoLog(filename,(void*)engine, (RedoPersistenceFunction)indexEngineRedoLogPersistenceFunction, synchronize, 0);
+	uint64 operateListMaxSize = 100;
+	RedoLog *redoLog = makeRedoLog(filename,(void*)engine,0, (RedoPersistenceFunction)indexEngineRedoLogPersistenceFunction, synchronize, 0);
 	// RedoLog *redoLog = makeRedoLog(filename, (void *)engine, (RedoPersistenceFunction)indexEngineRedoLogPersistenceFunction, sizeThreshold, 3);
 
 	printf("===测试索引引擎重做日志持久化===\n");
@@ -120,7 +122,7 @@ void testPersistence(){
 	}
 	freeRedoLog(redoLog);
 	//重新打开
-	redoLog = loadRedoLog(filename, (void *)engine, (RedoPersistenceFunction)indexEngineRedoLogPersistenceFunction, synchronize, 0);
+	redoLog = loadRedoLog(filename, (void *)engine,0, (RedoPersistenceFunction)indexEngineRedoLogPersistenceFunction, synchronize, 0);
 	List* redoList = getIndexEngineOperateList(redoLog);
 	freeRedoLog(redoLog);
 	printf("读取到的redo列表为%d\n", redoList->length);
@@ -134,11 +136,34 @@ void testPersistence(){
 	freeList(redoList);
 }
 
+void testOperateListMaxSize(){
+	char* filename = "test.redolog";
+	unlink(filename);
+	uint64 operateListMaxSize = 3;
+	RedoLog *redoLog = makeRedoLog(filename, NULL, operateListMaxSize, (RedoPersistenceFunction) demoPersistenceFunction, sizeThreshold, 3);
+	printf("===最大操作链表尺寸阻塞===\n");
+	uint64 inputs[] =  {1,2,3,4,5,6,7,8};
+	uint8 types[]  =   {1,2,3,1,2,3,3,3};
+	uint64 *key, *value;
+	for(int i=0; i<sizeof(inputs)/sizeof(inputs[0]); i++){
+		newAndCopyByteArray((uint8 **)&key, (uint8 *)&inputs[i], sizeof(inputs[0]));
+		newAndCopyByteArray((uint8 **)&value, (uint8 *)&inputs[i], sizeof(inputs[0]));
+		OperateTuple *op = makeOperateTuple(types[i], key, value);
+		printf("append操作type=%d key=%lld, value=%lld\n",
+				types[i],
+			   *key,
+			   *value);
+		appendRedoLog(redoLog, op);
+	}
+	freeRedoLog(redoLog);
+}
+
 TESTFUNC funcs[] = {
 	testSynchronize,
 	testDefiniteTime,
 	testSizeThreshold,
 	testPersistence,
+	testOperateListMaxSize,
 };
 
 int main(int argc, char const *argv[])

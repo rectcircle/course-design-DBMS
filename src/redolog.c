@@ -92,10 +92,10 @@ static void persistenceTask(RedoLog* redoLog){
 			if (redoLog->status == persistence){
 				redoLog->status = normal;
 			}
-			if(redoLog->flushStrategy==synchronize){
-				//同步策略立即通知工作线程
-				pthread_cond_signal(&redoLog->statusCond);
-			}
+			// if(redoLog->flushStrategy==synchronize){
+			//同步策略立即通知工作线程
+			pthread_cond_signal(&redoLog->statusCond);
+			// }
 		}
 	}
 }
@@ -104,14 +104,21 @@ static void persistenceTask(RedoLog* redoLog){
 static RedoLog *initRedoLog(
 	char *filename,
 	void *env,
+	uint64 operateListMaxSize,
 	RedoPersistenceFunction persistenceFunction,
 	enum RedoFlushStrategy flushStrategy,
 	uint64 flushStrategyArg)
 {
+	if (flushStrategy == sizeThreshold && operateListMaxSize < flushStrategyArg)
+	{
+		//如果允许将造成死锁
+		return NULL;
+	}
 	//拷贝文件名
 	RedoLog *redoLog = (RedoLog *)malloc(sizeof(RedoLog));
 	newAndCopyByteArray((uint8**)&redoLog->filename,(uint8*)filename, strlen(filename) + 1);
 	//成员变量
+	redoLog->operateListMaxSize = operateListMaxSize;
 	redoLog->flushStrategy = flushStrategy;
 	redoLog->flushStrategyArg = flushStrategyArg;
 	redoLog->lastFlushTime = currentTimeMillis();
@@ -167,13 +174,19 @@ OperateTuple *makeOperateTuple(uint8 type, ...){
 RedoLog *makeRedoLog(
 	char *filename,
 	void *env,
+	uint64 operateListMaxSize,
 	RedoPersistenceFunction persistenceFunction,
 	enum RedoFlushStrategy flushStrategy,
 	uint64 flushStrategyArg)
 {
 	int fd = createRedoLogFile(filename);
 	if(fd<0) { return NULL; }
-	RedoLog *redoLog = initRedoLog(filename, env, persistenceFunction, flushStrategy, flushStrategyArg);
+	RedoLog *redoLog = initRedoLog(filename, env, operateListMaxSize, persistenceFunction, flushStrategy, flushStrategyArg);
+	if (redoLog == NULL)
+	{
+		close(fd);
+		return NULL;
+	}
 	redoLog->fd = fd;
 	return redoLog;
 }
@@ -181,13 +194,18 @@ RedoLog *makeRedoLog(
 RedoLog *loadRedoLog(
 	char *filename,
 	void *env,
+	uint64 operateListMaxSize,
 	RedoPersistenceFunction persistenceFunction,
 	enum RedoFlushStrategy flushStrategy,
 	uint64 flushStrategyArg)
 {
 	int fd = openRedoLogFile(filename);
 	if(fd<0) { return NULL; }
-	RedoLog *redoLog = initRedoLog(filename, env, persistenceFunction, flushStrategy, flushStrategyArg);
+	RedoLog *redoLog = initRedoLog(filename, env, operateListMaxSize, persistenceFunction, flushStrategy, flushStrategyArg);
+	if(redoLog==NULL){
+		close(fd);
+		return NULL;
+	}
 	redoLog->fd = fd;
 	return redoLog;
 }
@@ -201,8 +219,9 @@ void appendRedoLog(RedoLog *redoLog, OperateTuple *ops){
 	}
 	if(redoLog->status != finish){
 		addList(redoLog->operateList, (void *)ops);
+		int flag = redoLog->operateList->length >= redoLog->operateListMaxSize;
 		pthread_cond_signal(&redoLog->statusCond);
-		if (redoLog->flushStrategy == synchronize){
+		if (flag || redoLog->flushStrategy == synchronize){
 			pthread_cond_wait(&redoLog->statusCond, &redoLog->statusMutex);
 		}
 	}

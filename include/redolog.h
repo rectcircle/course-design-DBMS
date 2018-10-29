@@ -100,6 +100,8 @@ typedef struct RedoLog
 	uint64 flushStrategyArg;
 	/** 上次持久化（或创建文件）的时间：毫秒级时间戳 */
 	uint64 lastFlushTime;
+	/** 内存中操作列表的最大尺寸，当超过了这个大小主线程将阻塞 */
+	uint64 operateListMaxSize;
 	/** 操作元组列表：操作中的元组List<OperateTuple*> */
 	struct List *operateList;
 	/** 重做元组状态 */
@@ -145,6 +147,7 @@ OperateTuple *makeOperateTuple(uint8 type, ...);
 RedoLog *makeRedoLog(
 	char *filename,
 	void *env,
+	uint64 operateListMaxSize,
 	RedoPersistenceFunction persistenceFunction,
 	enum RedoFlushStrategy flushStrategy,
 	uint64 flushStrategyArg);
@@ -160,6 +163,7 @@ RedoLog *makeRedoLog(
 RedoLog *loadRedoLog(
 	char *filename,
 	void *env,
+	uint64 operateListMaxSize,
 	RedoPersistenceFunction persistenceFunction,
 	enum RedoFlushStrategy flushStrategy,
 	uint64 flushStrategyArg);
