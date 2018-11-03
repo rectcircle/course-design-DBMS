@@ -11,7 +11,6 @@
 #include "redolog.h"
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <stdarg.h>
 #include <unistd.h>
 
 /** 创建文件：以O_APPEND方式 */
@@ -24,16 +23,11 @@ static int openRedoLogFile(const char * filename){
 	return open(filename, O_APPEND | O_RDWR);
 }
 
-static void freeOperateTuple(OperateTuple *operateTuple){
-	freeList(operateTuple->objects);
-	free(operateTuple);
-}
-
 void operateListForEach(void* value, void* args){
 	OperateTuple *operateTuple = (OperateTuple *)value;
 	RedoLog *redoLog = (RedoLog *)args;
 	redoLog->persistenceFunction(redoLog, operateTuple);
-	freeOperateTuple(operateTuple);
+	redoLog->freeOperateTuple(operateTuple);
 }
 
 /** 进行持久化 */
@@ -67,6 +61,7 @@ static void persistenceTask(RedoLog* redoLog){
 	while(1){
 		pthread_cleanup_push((void *)pthread_mutex_unlock, &redoLog->statusMutex);
 		pthread_mutex_lock(&redoLog->statusMutex);
+		pthread_testcancel();
 		//如果设置为finish状态，处理完剩余的直接结束
 		if (redoLog->status == finish){
 			addListToList(operateList, redoLog->operateList);
@@ -82,6 +77,7 @@ static void persistenceTask(RedoLog* redoLog){
 		} else {
 			//不需要进行持久化，wait
 			pthread_cond_wait(&redoLog->statusCond, &redoLog->statusMutex);
+			pthread_testcancel();
 		}
 		pthread_mutex_unlock(&redoLog->statusMutex);
 		pthread_cleanup_pop(0);
@@ -106,6 +102,7 @@ static RedoLog *initRedoLog(
 	void *env,
 	uint64 operateListMaxSize,
 	RedoPersistenceFunction persistenceFunction,
+	FreeOperateTupleFunction freeOperateTuple,
 	enum RedoFlushStrategy flushStrategy,
 	uint64 flushStrategyArg)
 {
@@ -125,6 +122,7 @@ static RedoLog *initRedoLog(
 	redoLog->operateList = makeList();
 	redoLog->status = normal;
 	redoLog->persistenceFunction = persistenceFunction;
+	redoLog->freeOperateTuple = freeOperateTuple;
 	redoLog->env = env;
 	//初始化线程相关内容
 	pthread_cond_init(&redoLog->statusCond, NULL);
@@ -140,48 +138,18 @@ static RedoLog *initRedoLog(
  * 公开API
  ******************************************************************************/
 
-OperateTuple *makeOperateTuple(uint8 type, ...){
-	va_list valist;
-	int len = 0;
-	switch (type)
-	{
-		case 1:
-			/* 表示插入：操作数长度为2 */
-			len = 2;
-			break;
-		case 2:
-			/* 表示移除：操作数长度为1 */
-			len = 1;
-			break;
-		case 3:
-			/* 表示精确移除：操作数长度为2 */
-			len = 2;
-			break;
-		default:
-			return NULL;
-	}
-	OperateTuple* operateTuple = calloc(1, sizeof (OperateTuple));
-	operateTuple->type = type;
-	operateTuple->objects = makeList();
-	va_start(valist, type);
-	for(int i=0; i<len; i++){
-		addList(operateTuple->objects, va_arg(valist, void*));
-	}
-	va_end(valist);
-	return operateTuple;
-}
-
 RedoLog *makeRedoLog(
 	char *filename,
 	void *env,
 	uint64 operateListMaxSize,
 	RedoPersistenceFunction persistenceFunction,
+	FreeOperateTupleFunction freeOperateTuple,
 	enum RedoFlushStrategy flushStrategy,
 	uint64 flushStrategyArg)
 {
 	int fd = createRedoLogFile(filename);
 	if(fd<0) { return NULL; }
-	RedoLog *redoLog = initRedoLog(filename, env, operateListMaxSize, persistenceFunction, flushStrategy, flushStrategyArg);
+	RedoLog *redoLog = initRedoLog(filename, env, operateListMaxSize, persistenceFunction, freeOperateTuple, flushStrategy, flushStrategyArg);
 	if (redoLog == NULL)
 	{
 		close(fd);
@@ -196,12 +164,13 @@ RedoLog *loadRedoLog(
 	void *env,
 	uint64 operateListMaxSize,
 	RedoPersistenceFunction persistenceFunction,
+	FreeOperateTupleFunction freeOperateTuple,
 	enum RedoFlushStrategy flushStrategy,
 	uint64 flushStrategyArg)
 {
 	int fd = openRedoLogFile(filename);
 	if(fd<0) { return NULL; }
-	RedoLog *redoLog = initRedoLog(filename, env, operateListMaxSize, persistenceFunction, flushStrategy, flushStrategyArg);
+	RedoLog *redoLog = initRedoLog(filename, env, operateListMaxSize, persistenceFunction, freeOperateTuple, flushStrategy, flushStrategyArg);
 	if(redoLog==NULL){
 		close(fd);
 		return NULL;
@@ -238,6 +207,23 @@ void freeRedoLog(RedoLog *redoLog){
 	pthread_cleanup_pop(0);
 	pthread_join(redoLog->persistenceThread, NULL);
 	close(redoLog->fd);
+	free(redoLog->filename);
+	freeList(redoLog->operateList);
+	free(redoLog);
+}
+
+void forceFreeRedoLog(RedoLog *redoLog){
+	pthread_cancel(redoLog->persistenceThread);
+	close(redoLog->fd);
+	free(redoLog->filename);
+	freeList(redoLog->operateList);
+	free(redoLog);
+}
+
+void forceFreeRedoLogAndUnlink(RedoLog *redoLog){
+	pthread_cancel(redoLog->persistenceThread);
+	close(redoLog->fd);
+	unlink(redoLog->filename);
 	free(redoLog->filename);
 	freeList(redoLog->operateList);
 	free(redoLog);

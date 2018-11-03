@@ -8,8 +8,9 @@
  * 2. 定时写入
  * 3. 阈值写入
  * 
- * OperateTuple内存管理方式：外部创建，内部释放
- * RedoLog内存管理方式：内部创建，内部释放，内部自制
+ * OperateTuple内存管理方式：make创建，内部释放
+ * OperateTuple的参数：外部创建，内部释放
+ * RedoLog内存管理方式：make创建，内部释放，内部自制
  * 
  * @filename: redolog.h
  * @description: 重做日志相关定义
@@ -43,6 +44,7 @@
 struct RedoLog;		 //去除警告用
 struct OperateTuple; //去除警告用
 typedef void (*RedoPersistenceFunction)(struct RedoLog *, struct OperateTuple *);
+typedef void (*FreeOperateTupleFunction)(struct OperateTuple *);
 
 /*****************************************************************************
  * 枚举定义
@@ -109,7 +111,10 @@ typedef struct RedoLog
 	/** 环境，该重做日志工作对象：针对索引引擎还是hash引擎？ */
 	void* env;
 	/** 持久化函数 */
-	void (*persistenceFunction)(struct RedoLog*, struct OperateTuple *);
+	// void (*persistenceFunction)(struct RedoLog*, struct OperateTuple *);
+	RedoPersistenceFunction persistenceFunction;
+	/** OperateTuple清理函数 */
+	FreeOperateTupleFunction freeOperateTuple;
 	/** 条件变量，用于控制并发 */
 	pthread_cond_t statusCond;
 	/** 用于互斥更改状态 */
@@ -124,21 +129,10 @@ typedef struct RedoLog
  * 公开API
  ******************************************************************************/
 
-/** 
- * 创建一个OperateTuple
- * @param type 操作类型
- * @param {...} 可变参数操作对象
- */
-OperateTuple *makeOperateTuple(uint8 type, ...);
-
-/**
- * 释放OperateTuple，私有函数
- */
-// void freeOperateTuple(OperateTuple * operateTuple);
-
 /**
  * 创建一个重做日志
  * @param filename 重做日志文件名
+ * @param operateListMaxSize 内存最大持久尺寸：超过这个尺寸将阻塞主线程
  * @param persistenceFunction 一个函数，针对每一个操作日志记录做持久化
  * @param flushStrategy 刷磁盘策略
  * @param flushStrategyArg 刷磁盘策略的参数
@@ -149,12 +143,14 @@ RedoLog *makeRedoLog(
 	void *env,
 	uint64 operateListMaxSize,
 	RedoPersistenceFunction persistenceFunction,
+	FreeOperateTupleFunction freeOperateTuple,
 	enum RedoFlushStrategy flushStrategy,
 	uint64 flushStrategyArg);
 
 /**
  * 从磁盘中加载一个重做日志
  * @param filename 重做日志文件名
+ * @param operateListMaxSize 内存最大持久尺寸：超过这个尺寸将阻塞主线程
  * @param persistenceFunction 一个函数，针对每一个操作日志记录做持久化
  * @param flushStrategy 刷磁盘策略
  * @param flushStrategyArg 刷磁盘策略的参数
@@ -165,6 +161,7 @@ RedoLog *loadRedoLog(
 	void *env,
 	uint64 operateListMaxSize,
 	RedoPersistenceFunction persistenceFunction,
+	FreeOperateTupleFunction freeOperateTuple,
 	enum RedoFlushStrategy flushStrategy,
 	uint64 flushStrategyArg);
 
@@ -180,5 +177,17 @@ void appendRedoLog(RedoLog *redoLog, OperateTuple* ops);
  * @param redoLog 一个可用的重做日志
  */
 void freeRedoLog(RedoLog *redoLog);
+
+/**
+ * 强制释放RedoLog（不等待刷磁盘线程完成）
+ * @param redoLog 一个可用的重做日志
+ */
+void forceFreeRedoLog(RedoLog* redoLog);
+
+/**
+ * 强制释放RedoLog（不等待刷磁盘线程完成），并删除文件
+ * @param redoLog 一个可用的重做日志
+ */
+void forceFreeRedoLogAndUnlink(RedoLog *redoLog);
 
 #endif

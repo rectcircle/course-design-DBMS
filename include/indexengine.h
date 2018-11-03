@@ -142,6 +142,10 @@ typedef struct IndexCache{
 	struct List* abandonedPageWork;
 	/** 废弃的影子页：废弃影子页插入，当每次持久化结束后交换加入abandonedPageWork，清空 */
 	struct List *abandonedPageFreeze;
+	/** 工作中的RedoLog */
+	struct RedoLog *redoLogWork;
+	/** 冻结的RedoLog */
+	struct RedoLog *redoLogFreeze;
 	/** 缓存状态 */
 	volatile int32 status;
 	/** 条件变量，用于控制并发 */
@@ -184,6 +188,12 @@ typedef struct IndexEngine {
 	uint64 count;
 	/** 下一个持久化版本号 */
 	uint64 nextNodeVersion;
+	/** 重做日志相关配置：内存最大持久尺寸 */
+	uint64 operateListMaxSize;
+	/** 重做日志相关配置：重做日志刷新策略 */
+	enum RedoFlushStrategy flushStrategy;
+	/** 重做日志相关配置：重做日志刷新策略参数 */
+	uint64 flushStrategyArg;
 	/** 运行时缓存 */
 	struct IndexCache cache;
 	/** B+树的元数据 */
@@ -284,6 +294,9 @@ int32 removeIndexEngine(IndexEngine *engine, uint8 *key, uint8 *value);
  * @param keyLen 键字节数
  * @param valueLen 值字节数
  * @param maxHeapSize 最大堆内存大小 0 表示96M，仅仅是个建议可能超过
+ * @param operateListMaxSize 内存最大持久尺寸：超过这个尺寸将阻塞主线程
+ * @param flushStrategy 重做日志刷磁盘策略
+ * @param flushStrategyArg 重做日志刷磁盘策略的参数
  * @return 一个可用的 索引引擎指针，参数异常，返回NULL
  */
 IndexEngine *makeIndexEngine(
@@ -292,16 +305,25 @@ IndexEngine *makeIndexEngine(
 	uint32 valueLen,
 	uint32 pageSize,
 	int8 isUnique,
-	uint64 maxHeapSize);
+	uint64 maxHeapSize, 
+	uint64 operateListMaxSize,
+	enum RedoFlushStrategy flushStrategy,
+	uint64 flushStrategyArg);
 
 /**
  * 从文件系统加载一个索引引擎，文件不存在返回NULL
  * 会进行启动检查，恢复状态
  * @param filename 文件路径
  * @param maxHeapSize 最大堆内存大小 0 表示96M，仅仅是个建议可能超过
+ * @param operateListMaxSize 内存最大持久尺寸：超过这个尺寸将阻塞主线程
+ * @param flushStrategy 刷磁盘策略
+ * @param flushStrategyArg 刷磁盘策略的参数
  * @return 一个可用的 索引引擎指针，文件不存在返回NULL
  */
-IndexEngine *loadIndexEngine(char *filename, uint64 maxHeapSize);
+IndexEngine *loadIndexEngine(char *filename, uint64 maxHeapSize, 
+							uint64 operateListMaxSize,
+							enum RedoFlushStrategy flushStrategy,
+							uint64 flushStrategyArg);
 
 /**
  * 释放一个IndexEngine的内存
@@ -315,19 +337,14 @@ void freeIndexEngine(IndexEngine * engine);
 
 /**
  * 刷磁盘，持久化操作
- * @param engine 创建来的是一个备份，最后会free掉
+ * @param engines [0] 为原来的本身， [1] 为备份最后会free掉
  */
 void flushIndexEngine(IndexEngine **engines);
 
 /**
- * 文件碎片整理
+ * 执行重做日志
  */
-void defragmentationIndexEngine(IndexEngine *engine);
-
-/**
- * 故障恢复
- */
-void recoveryIndexEngine(IndexEngine);
+void execIndexEngineRedoLog(IndexEngine* engine, List* operateList);
 
 
 /*****************************************************************************
@@ -451,15 +468,25 @@ uint32 readArrayPosition(IndexEngine *engine, uint64 position, char *dest, uint3
 /**
  * 读取元数据中的备份数据
  * @param engine IndexEngine 现存的引擎，用于获取fd
- * @return {IndexEngine*} 填充备份相关的字段的一个引擎结构
  */
-IndexEngine* readMetaBackData(IndexEngine *engine);
+void readMetaBackData(IndexEngine *engine);
 
 /**
  * 将磁盘中的相关字段拷贝到备份字段
  * @param engine IndexEngine 现存的引擎，用于获取fd，实际写入的不是其中的内容
  */
 void writeMetaBackData(IndexEngine *engine);
+
+/**
+ * 按页遍历整个索引文件
+ * @param engine IndexEngine 现存的引擎，用于获取fd
+ * @param func 处理函数
+ * @param args 外部参数
+ */
+void traverseIndexFileByPage(
+	IndexEngine *engine,
+	void (*func)(IndexEngine *engine, char *buffer, uint64 pageId, void *args),
+	void *args);
 
 /**
  * 从缓存或磁盘中读取一个节点
@@ -474,10 +501,15 @@ IndexTreeNode *getTreeNodeByPageId(IndexEngine *engine, uint64 pageId, int32 nod
 /**
  * 持久化断电测试用变量
  */
-extern int persistenceExceptionId;
+extern volatile int persistenceExceptionId;
 
 
 //重做日志相关业务函数
+
+/**
+ * 创建一个重做日志
+ */
+OperateTuple *makeIndexEngineOperateTuple(IndexEngine* engine, uint8 type, ...);
 
 /**
  * 索引引擎持久化函数
@@ -491,8 +523,7 @@ void indexEngineRedoLogPersistenceFunction(RedoLog *redoLog, OperateTuple *op);
  * @param redoLog 一个可用的重做日志
  * @return {List<OperateTuple>} 重做操作列表
  */
-List *getIndexEngineOperateList(RedoLog *redoLog);
-
+List *getIndexEngineOperateList(IndexEngine *engine, RedoLog *redoLog);
 #endif
 
 #endif

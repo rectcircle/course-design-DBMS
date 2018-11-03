@@ -11,15 +11,28 @@
 #include "indexengine.h"
 #include <time.h>
 
+static uint64 operateListMaxSize = 10000;
+static enum RedoFlushStrategy flushStrategy = sizeThreshold;
+static uint64 flushStrategyArg = 10000;
+
+static void clearRedoLogFile(char *indexFliename){
+	char *filename = malloc(strlen(indexFliename) + 30);
+	for(uint64 i=2; i<10; i++){
+		sprintf(filename, "%s_0x%016llx.redolog", indexFliename, i);
+		unlink(filename);
+	}
+}
+
 void testReadWriteMeta(){
 	printf("====测试读写元数据====\n");
 	char* filename = "test.idx";
 	unlink(filename);
+	clearRedoLogFile(filename);
 	//od -t x1 test.idx
-	IndexEngine *engine1 = makeIndexEngine(filename, 1, 1, 0, 0, 0);
+	IndexEngine *engine1 = makeIndexEngine(filename, 1, 1, 0, 0, 0,operateListMaxSize,flushStrategy, flushStrategyArg);
 	close(engine1->rfd);
 	close(engine1->wfd);
-	IndexEngine *engine2 = loadIndexEngine(filename, 0);
+	IndexEngine *engine2 = loadIndexEngine(filename, 0, operateListMaxSize, flushStrategy, flushStrategyArg);
 	printf("count=%lld %lld\n", engine1->count, engine2->count);
 	assertlonglong(engine1->count, engine2->count, "count");
 	printf("filename=%s %s\n", engine1->filename, engine2->filename);
@@ -59,10 +72,11 @@ void testInsertAndSearch(){
 	printf("====测试插入查询====\n");
 	char* filename = "test.idx";
 	unlink(filename);
+	clearRedoLogFile(filename);
 	// //度为6，每个缓存大小为3
 	// IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 1024);
 	//度为6，每个缓存大小为7
-	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 2048);
+	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 2048, operateListMaxSize, flushStrategy, flushStrategyArg);
 	uint64 inputs[] = {1, 1, 3, 3, 5, 6, 7};
 	List* list = searchIndexEngine(engine, (uint8*)&(inputs[0]));
 	printf("列表长度=%d\n",list->length);
@@ -78,8 +92,9 @@ void testPersistenceThread(){
 	printf("====测试持久化====\n");
 	char* filename = "test.idx";
 	unlink(filename);
+	clearRedoLogFile(filename);
 	//度为6，每个缓存大小为3
-	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 1024);
+	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 1024, operateListMaxSize, flushStrategy, flushStrategyArg);
 	uint64 inputs[] = {1, 2, 3, 4, 5, 6, 7};
 	List* list = searchIndexEngine(engine, (uint8*)&(inputs[0]));
 	freeList(list);
@@ -101,7 +116,7 @@ void testPersistenceThread(){
 	}
 	pthread_join(*engine->cache.persistenceThread, NULL);
 	printf("持久化后读====\n");
-	IndexEngine *engine1 = loadIndexEngine(filename, 1024);
+	IndexEngine *engine1 = loadIndexEngine(filename, 1024, operateListMaxSize, flushStrategy, flushStrategyArg);
 	for(int i=0; i<sizeof(inputs)/sizeof(inputs[0]); i++){
 		uint64 key = htonll(inputs[i]);
 		list = searchIndexEngine(engine1, (uint8 *)&key);
@@ -146,8 +161,9 @@ void testPersistenceThread(){
 void persistenceException(int expId){
 	char *filename = "test.idx";
 	unlink(filename);
+	clearRedoLogFile(filename);
 	//度为6，每个缓存大小为3
-	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 1024);
+	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 1024, 0, synchronize, 0);
 	uint64 inputs[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 	persistenceExceptionId = 0;
 	for(int i=0; i<7; i++){
@@ -178,7 +194,7 @@ void testPersistenceException(){
 	for(int i=0; i<13; i++){
 		printf("异常位置为：%d\n", i);
 		persistenceException(i);
-		engine = loadIndexEngine(filename, 1024);
+		engine = loadIndexEngine(filename, 1024, operateListMaxSize, flushStrategy, flushStrategyArg);
 		for(int i=0; i<sizeof(inputs)/sizeof(inputs[0]); i++){
 			uint64 key = htonll(inputs[i]);
 			list = searchIndexEngine(engine, (uint8 *)&key);
@@ -189,6 +205,7 @@ void testPersistenceException(){
 			}
 			freeList(list);
 		}
+		sleep(1);
 	}
 }
 
@@ -196,8 +213,9 @@ void testRemove1(){
 	printf("====测试删除1====\n");
 	char *filename = "test.idx";
 	unlink(filename);
+	clearRedoLogFile(filename);
 	//度为6，每个缓存大小为3
-	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 1024);
+	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 1024, operateListMaxSize, flushStrategy, flushStrategyArg);
 	uint64 data[] = {1, 2, 3, 4, 5, 6, 7, 8, 7, 3, 5, 8, 8, 1, 2, 4, 6, 8};
 	int8 ops[]   = {1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0};
 	//插入测试数据
@@ -226,8 +244,9 @@ void testRemove2(){
 	printf("====测试删除2====\n");
 	char *filename = "test.idx";
 	unlink(filename);
+	clearRedoLogFile(filename);
 	//度为6，每个缓存大小为3
-	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 1024);
+	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 1024, operateListMaxSize, flushStrategy, flushStrategyArg);
 	uint64 data[] = {1, 1, 1, 1, 1, 1, 1, 1, 1};
 	int8 ops[]    = {1, 1, 1, 1, 1, 1, 1, 1, 0};
 	//插入测试数据
@@ -256,8 +275,9 @@ void testRemove3(){
 	printf("====测试删除3====\n");
 	char *filename = "test.idx";
 	unlink(filename);
+	clearRedoLogFile(filename);
 	//度为6，每个缓存大小为3
-	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 1024);
+	IndexEngine *engine = makeIndexEngine(filename, 8, 8, 136, 0, 1024, operateListMaxSize, flushStrategy, flushStrategyArg);
 	uint64 keys[]   = {1, 1, 1, 1, 1, 1, 1, 1, 1};
 	uint64 values[] = {1, 2, 3, 4, 5, 6, 7, 8, 3};
 	int8 ops[]      = {1, 1, 1, 1, 1, 1, 1, 1, 0};
@@ -287,10 +307,10 @@ TESTFUNC funcs[] = {
 	// testReadWriteMeta,
 	// testInsertAndSearch,
 	// // testPersistenceThread,
-	// testPersistenceException,
-	testRemove1,
-	testRemove2,
-	testRemove3,
+	testPersistenceException,
+	// testRemove1,
+	// testRemove2,
+	// testRemove3,
 };
 
 int main(int argc, char const *argv[])

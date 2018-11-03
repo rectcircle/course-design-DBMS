@@ -9,6 +9,7 @@
  ******************************************************************************/
 
 #include "indexengine.h"
+#include <stdarg.h>
 
 //魔数
 static const uint32 MAGIC_NUMBER=0x960729dbu;
@@ -359,9 +360,8 @@ uint32 readArrayPosition(IndexEngine *engine, uint64 position, char *dest, uint3
 	return len;
 }
 
-private IndexEngine *readMetaBackData(IndexEngine *engine){
-	IndexEngine *engineBack = (IndexEngine *)malloc(sizeof(IndexEngine));
-	uint32 len = 80;
+private void readMetaBackData(IndexEngine *engine){
+	uint32 len = INDEX_META_SIZE_NO_BACK;
 	len += readTypePosition(engine, len, &engine->flag, sizeof(engine->flag));
 	len += readTypePosition(engine, len, &engine->treeMeta.depth, sizeof(engine->treeMeta.depth));
 	len += readTypePosition(engine, len, &engine->count, sizeof(engine->count));
@@ -370,17 +370,40 @@ private IndexEngine *readMetaBackData(IndexEngine *engine){
 	len += readTypePosition(engine, len, &engine->nextPageId, sizeof(engine->nextPageId));
 	len += readTypePosition(engine, len, &engine->usedPageCnt, sizeof(engine->usedPageCnt));
 	len += readTypePosition(engine, len, &engine->nextNodeVersion, sizeof(engine->nextNodeVersion));
-	return engineBack;
 }
 
 private void writeMetaBackData(IndexEngine *engine){
 	char metaBuffer[INDEX_META_SIZE];
 	readPageIndexFile(engine, 0, metaBuffer, INDEX_META_SIZE);
 	//写flag到flagBak
-	uint32 len = 80;
+	uint32 len = INDEX_META_SIZE_NO_BACK;
 	len += writeArrayPosition(engine, len, metaBuffer + 12, 4);
 	len += writeArrayPosition(engine, len, metaBuffer + 20, 4);
 	len += writeArrayPosition(engine, len, metaBuffer + 32, 6*8);
+}
+
+private void traverseIndexFileByPage(
+	IndexEngine* engine, 
+	void (*func)(IndexEngine* engine, char* buffer, uint64 pageId, void* args), 
+	void* args)
+{
+	char* buffer = malloc(engine->pageSize);
+	for(uint64 i=0; ; i++){
+		lseek(engine->rfd, i*engine->pageSize, SEEK_SET);
+		memset(buffer, 0, engine->pageSize);
+		if(read(engine->rfd, buffer, engine->pageSize)<=0){
+			break;
+		}
+		func(engine, buffer, i, args);
+	}
+}
+
+
+private void writeIndexEngineMeta(IndexEngine* engine){
+	  char metaBuffer[INDEX_META_SIZE];
+	  memset(metaBuffer, 0, INDEX_META_SIZE);
+	  metaToBuffer(engine, metaBuffer);
+	  writePageIndexFile(engine, 0, metaBuffer, INDEX_META_SIZE);
 }
 
 /*****************************************************************************
@@ -424,6 +447,14 @@ static void swapChangeCache(IndexEngine *engine){
 	engine->cache.changeCacheWork = tmp;
 }
 
+//声明
+static RedoLog* createIndexEngineRedoLog(IndexEngine* engine);
+/** 交换并创建一个新的重做日志 */
+static void swapAndCreateRedoLog(IndexEngine *engine){
+	engine->cache.redoLogFreeze = engine->cache.redoLogWork;
+	engine->cache.redoLogWork = createIndexEngineRedoLog(engine);
+}
+
 /** 添加到changeCacheWork中（若UnchangeCache存在则删除） */
 static void putTochangeCacheWork(IndexEngine* engine, IndexTreeNode* node){
 	removeLRUCache(engine->cache.unchangeCache, (uint8 *)&node->pageId);
@@ -456,6 +487,8 @@ static void checkThreadPersistence(IndexEngine* engine){
 		engine->cache.status = CACHE_STATUS_PERSISTENCE;
 		//此时版本号增加
 		engine->nextNodeVersion++;
+		//必须在上一句的下面：创建新的重做日志并将旧的重做日志备份，等待持久化完成后直接强制退出并删除文件
+		swapAndCreateRedoLog(engine);
 		//不需要进一步检查如下if条件，因为其他线程不会修改条件
 		//engine->cache.changeCacheWork->size>=engine->cache.unchangeCache->capacity
 		pthread_mutex_unlock(engine->cache.statusMutex);
@@ -624,6 +657,63 @@ private IndexTreeNode* getTreeRootNode(IndexEngine *engine){
  * 私有函数：重做日志相关内容
  ******************************************************************************/
 
+/**
+ * 创建重做日志
+ */
+private OperateTuple *makeIndexEngineOperateTuple(IndexEngine* engine, uint8 type, ...){
+	va_list valist;
+	int len = 0;
+	switch (type)
+	{
+		case 1:
+			/* 表示插入：操作数长度为2 */
+			len = 2;
+			break;
+		case 2:
+			/* 表示移除：操作数长度为1 */
+			len = 1;
+			break;
+		case 3:
+			/* 表示精确移除：操作数长度为2 */
+			len = 2;
+			break;
+		default:
+			return NULL;
+	}
+	OperateTuple* operateTuple = calloc(1, sizeof (OperateTuple));
+	operateTuple->type = type;
+	operateTuple->objects = makeList();
+	va_start(valist, type);
+	for(int i=0; i<len; i++){
+		uint8* value;
+		if(i==0){
+			newAndCopyByteArray(&value, va_arg(valist, uint8 *), engine->treeMeta.keyLen);
+		} else if(i==1){
+			newAndCopyByteArray(&value, va_arg(valist, uint8 *), engine->treeMeta.valueLen);
+		}
+		addList(operateTuple->objects, value);
+	}
+	va_end(valist);
+	return operateTuple;
+}
+
+/**
+ * 清理操作链表
+ */
+static void freeIndexEngineOperateTuple(OperateTuple *operateTuple){
+	if(operateTuple->objects!=NULL){
+		ListNode *node = NULL;
+		ListNode *tmp = operateTuple->objects->head;
+		while ((node = tmp) != NULL)
+		{
+			tmp = node->next;
+			free(node->value);
+		}
+	}
+	freeList(operateTuple->objects);
+	free(operateTuple);
+}
+
 static void operateTupleToBuffer(IndexEngine* indexEngine, OperateTuple* op, char* buffer){
 	int len = 0;
 	memcpy(buffer + len, &op->type, 1);
@@ -649,11 +739,11 @@ private void indexEngineRedoLogPersistenceFunction(RedoLog* redoLog, OperateTupl
 	char *buffer = malloc(len);
 	operateTupleToBuffer(indexEngine, op, buffer);
 	write(redoLog->fd, buffer, len);
+	pthread_testcancel();
 	free(buffer);
 }
 
-
-private List *getIndexEngineOperateList(RedoLog *redoLog){
+private List *getIndexEngineOperateList(IndexEngine* engine, RedoLog *redoLog){
 	List* list = makeList();
 	uint8 type = 0;
 	lseek(redoLog->fd, 0, SEEK_SET);
@@ -661,40 +751,52 @@ private List *getIndexEngineOperateList(RedoLog *redoLog){
 		IndexEngine *indexEngine = (IndexEngine *)redoLog->env;
 		void *key = malloc(indexEngine->treeMeta.keyLen);
 		void *value = malloc(indexEngine->treeMeta.valueLen);
-
-		switch (type)
-		{
-			case 2:
-				if(read(redoLog->fd, key, indexEngine->treeMeta.keyLen)!=indexEngine->treeMeta.keyLen){
-					free(key);
-					free(value);
-					return list;
-				}
-				free(value);
-				addList(list, makeOperateTuple(type, key, value));
-				break;
-			case 1:
-			case 3:
-				if (read(redoLog->fd, key, indexEngine->treeMeta.keyLen) != indexEngine->treeMeta.keyLen){
-					free(key);
-					free(value);
-					return list;
-				}
-				if(read(redoLog->fd, value, indexEngine->treeMeta.valueLen)!=indexEngine->treeMeta.valueLen){
-					free(key);
-					free(value);
-					return list;
-				}
-				addList(list, makeOperateTuple(type, key, value));
-				break;
-			default:
+		
+		if(type==2){
+			if (read(redoLog->fd, key, indexEngine->treeMeta.keyLen) != indexEngine->treeMeta.keyLen){
 				free(key);
 				free(value);
-				return list;
 				break;
+			}
+		} else if(type==1 || type==3){
+			if (read(redoLog->fd, key, indexEngine->treeMeta.keyLen) != indexEngine->treeMeta.keyLen){
+				free(key);
+				free(value);
+				break;
+			}
+			if (read(redoLog->fd, value, indexEngine->treeMeta.valueLen) != indexEngine->treeMeta.valueLen){
+				free(key);
+				free(value);
+				break;
+			}
+		} else {
+			free(key);
+			free(value);
+			break;
 		}
+		addList(list, (void *)makeIndexEngineOperateTuple(engine, type, key, value));
+		free(key);
+		free(value);
 	}
 	return list;
+}
+
+static RedoLog* createIndexEngineRedoLog(IndexEngine* engine){
+	char *filename = malloc(strlen(engine->filename)+30);
+	sprintf(filename, "%s_0x%016llx.redolog", engine->filename, engine->nextNodeVersion);
+	return makeRedoLog(filename, (void *)engine, engine->operateListMaxSize,
+					   indexEngineRedoLogPersistenceFunction,
+					   freeIndexEngineOperateTuple,
+					   engine->flushStrategy, engine->flushStrategyArg);
+}
+
+static RedoLog* loadIndexEngineRedoLog(IndexEngine* engine, uint64 nextNodeVersion){
+	char *filename = malloc(strlen(engine->filename)+30);
+	sprintf(filename, "%s_0x%016llx.redolog", engine->filename, nextNodeVersion);
+	return loadRedoLog(filename, (void *)engine, engine->operateListMaxSize,
+					   indexEngineRedoLogPersistenceFunction,
+					   freeIndexEngineOperateTuple,
+					   engine->flushStrategy, engine->flushStrategyArg);
 }
 
 /*****************************************************************************
@@ -707,7 +809,10 @@ IndexEngine *makeIndexEngine(
 	uint32 valueLen,
 	uint32 pageSize,
 	int8 isUnique,
-	uint64 maxHeapSize)
+	uint64 maxHeapSize,
+	uint64 operateListMaxSize,
+	enum RedoFlushStrategy flushStrategy,
+	uint64 flushStrategyArg)
 {
 	//初始化为16k
 	if(pageSize==0) pageSize = 16*1024; 
@@ -759,10 +864,7 @@ IndexEngine *makeIndexEngine(
 	engine->treeMeta.root = 1;
 	engine->treeMeta.sqt = 1;
 	engine->count = 0;
-	char metaBuffer[INDEX_META_SIZE];
-	memset(metaBuffer, 0, INDEX_META_SIZE);
-	metaToBuffer(engine, metaBuffer);
-	writePageIndexFile(engine, 0, metaBuffer, INDEX_META_SIZE);
+	writeIndexEngineMeta(engine);
 	//创建并写入根节点
 	char rootBuffer[NODE_META_SIZE];
 	memset(rootBuffer, 0, sizeof(rootBuffer));
@@ -778,10 +880,41 @@ IndexEngine *makeIndexEngine(
 	CLR_CREATING(engine->flag);
 	writeTypePosition(engine, 12, &engine->flag, sizeof(engine->flag));
 	fsync(engine->wfd);
+	//创建重做日志
+	engine->operateListMaxSize = operateListMaxSize;
+	engine->flushStrategy = flushStrategy;
+	engine->flushStrategyArg = flushStrategyArg;
+	engine->cache.redoLogWork = createIndexEngineRedoLog(engine);
+	if(engine->cache.redoLogWork==NULL){
+		freeIndexEngine(engine);
+		return NULL;
+	}
 	return engine;
 }
 
-IndexEngine *loadIndexEngine(char *filename, uint64 maxHeapSize)
+/** 检查并清理文件中的脏页 */
+static void checkAndCleanPage(IndexEngine* engine, char* buffer, uint64 pageId, void* args){
+	if(pageId==0){
+		return;
+	}
+	uint64 nodeVersion=0;
+	parseFromBuffer(buffer+24, (void*) &nodeVersion, sizeof(nodeVersion));
+	
+	// printf("正在清理脏页：pageId=%llu, nodeVersion=%llu, nextVersion=%llu\n",
+	// 	pageId,
+	// 	nodeVersion,
+	// 	engine->nextNodeVersion
+	// );
+	if(nodeVersion>=engine->nextNodeVersion){
+		nodeVersion = 0;
+		writeTypePosition(engine, pageId * engine->pageSize, (void *)&nodeVersion, sizeof(nodeVersion));
+	}
+}
+
+IndexEngine *loadIndexEngine(char *filename, uint64 maxHeapSize,
+							 uint64 operateListMaxSize,
+							 enum RedoFlushStrategy flushStrategy,
+							 uint64 flushStrategyArg)
 {
 	int rfd = openIndexFile(filename);
 	int wfd = openIndexFile(filename);
@@ -809,19 +942,61 @@ IndexEngine *loadIndexEngine(char *filename, uint64 maxHeapSize)
 	}
 	//在进行持久化的时候宕机
 	if (IS_PERSISTENCE(flag)){
-		//TODO 遍历树对废弃页进行标记
+		//清理数据页
+		traverseIndexFileByPage(engine, checkAndCleanPage, NULL);
+		//清理标记
+		CLR_SWITCHTREE(engine->flag);
+		CLR_PERSISTENCE(engine->flag);
+		//写回磁盘：清除标记
+		writeIndexEngineMeta(engine);
 	}
 	//在进行持久化-写元数据的时候宕机
 	if (IS_SWITCHTREE(flag)){
-		//TODO 进入恢复路径：从备份中恢复元数据
-		//TODO 遍历树对废弃页进行标记
+		//进入恢复路径：从备份中恢复元数据
+		readMetaBackData(engine);
+		//清理数据页
+		traverseIndexFileByPage(engine, checkAndCleanPage, NULL);
+		//清理标记
+		CLR_SWITCHTREE(engine->flag);
+		//写回磁盘：清除标记、恢复备份数据
+		writeIndexEngineMeta(engine);
 	}
-	//TODO 进行碎片整理，根据配置是否进行
-	//TODO 执行重做日志
+	//初始化缓存
 	if(initIndexCache(engine, maxHeapSize)!=0){
 		freeIndexEngine(engine);
 		return NULL;
 	}
+
+	engine->operateListMaxSize = operateListMaxSize;
+	engine->flushStrategy = flushStrategy;
+	engine->flushStrategyArg = flushStrategyArg;
+	
+	//检查是否存在重做日志，存在则读取
+	uint64 nextNodeVersion = engine->nextNodeVersion;
+	for(int i=0; i<2; i++){
+		RedoLog* redoLog = loadIndexEngineRedoLog(engine, nextNodeVersion+i);
+		List *operateList = NULL;
+		if (redoLog!=NULL) {
+			operateList = getIndexEngineOperateList(engine, redoLog);
+			//TODO bug: 当在执行重做日志过程中断电：将造成再次数据丢失
+			// 方案1：忽略
+			// 方案2：重命名为enginename.redolog.bak（任然存在问题：启动配置不能发生变更）
+			forceFreeRedoLogAndUnlink(redoLog);
+		}
+		if(engine->cache.redoLogWork==NULL){
+			//创建新的重做日志
+			engine->cache.redoLogWork = createIndexEngineRedoLog(engine);
+			if (engine->cache.redoLogWork == NULL){
+				freeIndexEngine(engine);
+				return NULL;
+			}
+		}
+		if (operateList != NULL){
+			//执行重做日志
+			execIndexEngineRedoLog(engine, operateList);
+		}
+	}
+
 	return engine;
 }
 
@@ -1207,6 +1382,11 @@ List *searchIndexEngine(IndexEngine *engine, uint8 *key){
 }
 
 int32 insertIndexEngine(IndexEngine *engine, uint8 *key, uint8 *value){
+	pthread_cleanup_push((void *)pthread_mutex_unlock, engine->cache.statusMutex);
+	pthread_mutex_lock(engine->cache.statusMutex);
+	appendRedoLog(engine->cache.redoLogWork, makeIndexEngineOperateTuple(engine, 1, key, value));
+	pthread_mutex_unlock(engine->cache.statusMutex);
+	pthread_cleanup_pop(0);
 	IndexTreeMeta* treeMeta = &engine->treeMeta;
 	//违反唯一约束
 	if (treeMeta->isUnique){
@@ -1238,6 +1418,16 @@ int32 insertIndexEngine(IndexEngine *engine, uint8 *key, uint8 *value){
 }
 
 int32 removeIndexEngine(IndexEngine *engine, uint8 *key, uint8 *value){
+	pthread_cleanup_push((void *)pthread_mutex_unlock, engine->cache.statusMutex);
+	pthread_mutex_lock(engine->cache.statusMutex);
+	if(value==NULL){
+		appendRedoLog(engine->cache.redoLogWork, makeIndexEngineOperateTuple(engine, 2, key));
+	} else {
+		appendRedoLog(engine->cache.redoLogWork, makeIndexEngineOperateTuple(engine, 3, key, value));
+	}
+	pthread_mutex_unlock(engine->cache.statusMutex);
+	pthread_cleanup_pop(0);
+
 	int32 removeCnt = 0;
 	for(;;){
 		int32 cnt = removeFrom(engine, engine->treeMeta.root, key, value, 1);
@@ -1308,9 +1498,7 @@ void flushIndexEngine(IndexEngine **engines){
 	//确保数据写入
 	fsync(engine->wfd);
 	//完成树切换：将新的元数据可入磁盘
-	char* metaBuffer = (char*) malloc(INDEX_META_SIZE_NO_BACK);
-	metaToBuffer(freezeEngine, metaBuffer);
-	writePageIndexFile(engine, 0, metaBuffer, INDEX_META_SIZE_NO_BACK);
+	writeIndexEngineMeta(freezeEngine);
 	fsync(engine->wfd);
 	//磁盘状态：切换到正常状态
 	CLR_SWITCHTREE(diskFlag);
@@ -1335,7 +1523,7 @@ void flushIndexEngine(IndexEngine **engines){
 	free(engines);
 }
 #else
-int persistenceExceptionId=0;
+volatile int persistenceExceptionId=0;
 void flushIndexEngine(IndexEngine **engines){
 	IndexEngine *engine = engines[0];
 	IndexEngine *freezeEngine = engines[1];
@@ -1385,9 +1573,7 @@ void flushIndexEngine(IndexEngine **engines){
 	fsync(engine->wfd);
 	if(persistenceExceptionId==7) return;
 	//完成树切换：将新的元数据可入磁盘
-	char* metaBuffer = (char*) malloc(INDEX_META_SIZE_NO_BACK);
-	metaToBuffer(freezeEngine, metaBuffer);
-	writePageIndexFile(engine, 0, metaBuffer, INDEX_META_SIZE_NO_BACK);
+	writeIndexEngineMeta(freezeEngine);
 	if(persistenceExceptionId==8) return;
 	fsync(engine->wfd);
 	if(persistenceExceptionId==9) return;
@@ -1408,6 +1594,8 @@ void flushIndexEngine(IndexEngine **engines){
 	if(persistenceExceptionId==12) return;
 	//清空缓存缓存
 	clearLRUCache(freezeCache);
+	//强制清理重做日志
+	forceFreeRedoLogAndUnlink(engine->cache.redoLogFreeze);
 	//通知其他阻塞线程
 	pthread_cond_signal(engine->cache.statusCond);
 	pthread_mutex_unlock(engine->cache.statusMutex);
@@ -1417,3 +1605,27 @@ void flushIndexEngine(IndexEngine **engines){
 	free(engines);
 }
 #endif
+
+static void doRedoOperatation(OperateTuple* operateTuple, IndexEngine* engine){
+	//TODO 执行日志
+	printf("正在执行重做日志...\n");
+	
+	switch (operateTuple->type)
+	{
+		case 1:
+			insertIndexEngine(engine, operateTuple->objects->head->value, operateTuple->objects->head->next->value);
+			break;
+		case 2:
+			removeIndexEngine(engine, operateTuple->objects->head->value, NULL);
+			break;
+		case 3:
+			removeIndexEngine(engine, operateTuple->objects->head->value, operateTuple->objects->head->next->value);
+			break;
+		default:
+			break;
+	}
+}
+
+void execIndexEngineRedoLog(IndexEngine *engine, List *operateList){
+	foreachList(operateList, (void (*)(void*, void*))doRedoOperatation, engine);
+}
