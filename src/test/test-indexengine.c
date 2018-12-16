@@ -304,13 +304,13 @@ void testRemove3(){
 }
 
 TESTFUNC funcs[] = {
-	// testReadWriteMeta,
-	// testInsertAndSearch,
-	// // testPersistenceThread,
+	testReadWriteMeta,
+	testInsertAndSearch,
+	testPersistenceThread,
 	testPersistenceException,
-	// testRemove1,
-	// testRemove2,
-	// testRemove3,
+	testRemove1,
+	testRemove2,
+	testRemove3,
 };
 
 int main(int argc, char const *argv[])

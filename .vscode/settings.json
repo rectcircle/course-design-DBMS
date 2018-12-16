@@ -12,6 +12,10 @@
 		"indexengine.h": "c",
 		"fcntl.h": "c",
 		"redolog.h": "c",
-		"stat.h": "c"
+		"stat.h": "c",
+		"hashmap.h": "c",
+		"time.h": "c",
+		"hashengine.h": "c",
+		"stdarg.h": "c"
 	}
 }

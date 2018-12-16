@@ -106,7 +106,8 @@ private IndexTreeNode* newIndexTreeNode(IndexEngine* engine, int32 nodeType){
 }
 
 /** Free一个Node */
-private void freeIndexTreeNode(IndexTreeNode* node, int32 nodeType){
+private void freeIndexTreeNode(IndexTreeNode* node){
+	int32 nodeType = node->type;
 	for(int i=0; i<node->size; i++){
 		free(node->keys[i]);
 		if (nodeType != NODE_TYPE_LINK){
@@ -252,10 +253,10 @@ static int parseFromBuffer(char* buffer, const void* data, uint32 len){
 			*dest2 = ntohs(*(uint16_t *)buffer);
 			break;
 		case 4:
-			*dest4 = htonl(*(uint32 *)buffer);
+			*dest4 = ntohl(*(uint32 *)buffer);
 			break;
 		case 8:
-			*dest8 = htonll(*(uint64 *)buffer);
+			*dest8 = ntohll(*(uint64 *)buffer);
 			break;
 		default:
 			break;
@@ -525,7 +526,7 @@ private IndexTreeNode* getTreeNodeByPageId(IndexEngine *engine, uint64 pageId, i
 	pthread_mutex_lock(engine->cache.statusMutex);
 	//当前处于持久化中的状态，搜索冻结的缓存
 	if(engine->cache.status==CACHE_STATUS_PERSISTENCE){
-		result = getLRUCache(changeCacheFreeze, (uint8*)&pageId);
+		result = getLRUCacheNoChange(changeCacheFreeze, (uint8*)&pageId);
 	}
 	//获取到了，将其拷贝插入到unchangeCache
 	if (result != NULL){
@@ -591,7 +592,7 @@ private IndexTreeNode* getTreeNodeByPageId(IndexEngine *engine, uint64 pageId, i
 		IndexTreeNode *eliminateNode = (IndexTreeNode *)putLRUCache(unchangeCache, (uint8*)&pageId, (void *)result);
 		//发生淘汰，清理内存
 		if(eliminateNode!=NULL){
-			freeIndexTreeNode(eliminateNode, eliminateNode->type);
+			freeIndexTreeNode(eliminateNode);
 		}
 		pageId = nodes[i]->after;
 	}
@@ -600,10 +601,10 @@ private IndexTreeNode* getTreeNodeByPageId(IndexEngine *engine, uint64 pageId, i
 	} else {
 		if(nodes[0]->nodeVersion>=engine->nextNodeVersion){
 			result = nodes[1];
-			freeIndexTreeNode(nodes[0], nodes[0]->type);
+			freeIndexTreeNode(nodes[0]);
 		} else if(nodes[1]->nodeVersion>=engine->nextNodeVersion){
 			result = nodes[0];
-			freeIndexTreeNode(nodes[1], nodes[1]->type);
+			freeIndexTreeNode(nodes[1]);
 		}
 	}
 	if(result!=NULL){
@@ -620,7 +621,7 @@ private IndexTreeNode* getTreeNodeByPageId(IndexEngine *engine, uint64 pageId, i
 			result->after = nodes[0]->after;
 			result->status = NODE_STATUS_UPDATE;
 			result->nodeVersion = engine->nextNodeVersion;
-			freeIndexTreeNode(nodes[0], nodes[0]->type);
+			freeIndexTreeNode(nodes[0]);
 		} else {
 			//有效数据在node[0]：链接节点
 			result = nodes[0];
@@ -635,7 +636,7 @@ private IndexTreeNode* getTreeNodeByPageId(IndexEngine *engine, uint64 pageId, i
 			result->after = 0;
 			result->status = NODE_STATUS_UPDATE;
 			result->nodeVersion = engine->nextNodeVersion;
-			freeIndexTreeNode(nodes[1], nodes[1]->type);
+			freeIndexTreeNode(nodes[1]);
 		}
 	}
 	if(result->status==NODE_STATUS_OLD){
@@ -1592,7 +1593,12 @@ void flushIndexEngine(IndexEngine **engines){
 		addListToList(engine->cache.abandonedPageWork, engine->cache.abandonedPageFreeze);
 	}
 	if(persistenceExceptionId==12) return;
-	//清空缓存缓存
+	//清空缓存缓存 
+	node = freezeCache->head;
+	while((node=node->next)!=freezeCache->head){
+		IndexTreeNode *treeNode = (IndexTreeNode *)node->value;
+		freeIndexTreeNode(treeNode);
+	}
 	clearLRUCache(freezeCache);
 	//强制清理重做日志
 	forceFreeRedoLogAndUnlink(engine->cache.redoLogFreeze);

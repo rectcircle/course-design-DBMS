@@ -70,6 +70,10 @@ int32 deleteFromArray(void** array, uint32 len, uint32 index){
  * newAndCopyByteArray
  ******************************************************************************/
 void newAndCopyByteArray(uint8 **dest, uint8 *src, uint32 len){
+	if(len==0){
+		*dest = NULL;
+		return;
+	}
 	*dest = (uint8*) malloc(len);
 	memcpy(*dest,src, len);
 }

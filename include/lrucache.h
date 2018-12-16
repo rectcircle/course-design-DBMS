@@ -115,6 +115,14 @@ void* putLRUCacheWithHook(
 void *getLRUCache(LRUCache *cache, uint8 *key);
 
 /**
+ * 从LRU缓存中获取key对应的value，若不存在返回NULL，不将查到的节点移动到首部（可以并发进行遍历）
+ * @param cache 待操作的LRU缓存对象
+ * @param key 键
+ * @return {int8 *} value字节数组或者NULL
+ */
+void *getLRUCacheNoChange(LRUCache *cache, uint8 *key);
+
+/**
  * 从LRU缓存中获取删除一对key
  * @param cache 待操作的LRU缓存对象
  * @param key 键

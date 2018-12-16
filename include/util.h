@@ -192,6 +192,6 @@ uint64 currentTimeMillis();
 					 (((val) << 56)))
 
 #define htonll(val) ((htons(1)==1) ? val : __swap64(val))
-#define ntohll(val) hton64(val)
+#define ntohll(val) htonll(val)
 
 #endif

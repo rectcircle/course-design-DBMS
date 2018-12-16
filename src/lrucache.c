@@ -15,7 +15,7 @@
  ******************************************************************************/
 
 /** 计算key的hash值 */
-private uint32 hashCode(uint8 *key, uint32 keyLen){
+static uint32 hashCode(uint8 *key, uint32 keyLen){
 	//改进的32位FNV算法1
 	static uint32 p = 16777619;
 	uint32 hash = 2166136261;
@@ -201,6 +201,15 @@ void *getLRUCache(LRUCache *cache, uint8 *key){
 	LRUNode* node = getFromHashTable(cache, key, hashcode);
 	if(node!=NULL){
 		moveToFirst(cache, node);
+		return node->value;
+	}
+	return NULL;
+}
+
+void *getLRUCacheNoChange(LRUCache *cache, uint8 *key){
+	uint32 hashcode = hashCode(key, cache->keyLen);
+	LRUNode* node = getFromHashTable(cache, key, hashcode);
+	if(node!=NULL){
 		return node->value;
 	}
 	return NULL;
