@@ -23,7 +23,7 @@
 static const uint32 MAGIC_NUMBER = 0x960729abu;
 
 /*****************************************************************************
- * 私有函数：文件操作、序列化、反序列化函数
+ * 私有函数：文件操作、序列化、反序列化、线程启动函数
  ******************************************************************************/
 
 static int createHashFile(const char *filename)
@@ -87,9 +87,72 @@ static Record *loadRecord(int rfd, uint64 position, int skipValue){
 	return record;
 }
 
+static void startPersistenceThread(HashEngine* engine){
+	//启动持久化线程
+	pthread_cleanup_push((void *)pthread_mutex_unlock, &engine->statusMutex);
+	pthread_mutex_lock(&engine->statusMutex);
+	while(engine->persistenceStatus!=None){
+		pthread_cond_wait(&engine->statusCond, &engine->statusMutex);
+	}
+	LRUCache * tmp = engine->writeCache;
+	engine->writeCache = engine->freezeWriteCache;
+	engine->freezeWriteCache = tmp;
+	engine->persistenceStatus = Doing;
+	pthread_mutex_unlock(&engine->statusMutex);
+	pthread_cleanup_pop(0);
+	pthread_create(&engine->persistenceThread, NULL, (void *)flushHashEngine, (void *)engine);
+}
+
 /*****************************************************************************
  *构造、析构函数
  ******************************************************************************/
+
+static RecordLocation* makeRecordLocation(uint64 id, uint64 position){
+	RecordLocation *location = (RecordLocation *)malloc(sizeof(RecordLocation));
+	location->id = id;
+	location->position = position;
+	return location;
+}
+
+static void freeRecordLocation(RecordLocation* location){
+	free(location);
+}
+
+static void* freeHashMapRecordLocation(struct Entry * entry, void* args){
+	freeRecordLocation((RecordLocation*) entry->value);
+	return NULL;
+}
+
+static Record *makeRecord(uint64 version, uint32 keyLen, uint32 valueLen, uint8 *key, uint8 *value){
+	Record *record = (Record*) malloc(sizeof(Record));
+	record->version = version;
+	record->keyLen = keyLen;
+	record->valueLen = valueLen;
+	uint8* copyKey, *copyValue;
+	newAndCopyByteArray(&copyKey, key, keyLen);
+	newAndCopyByteArray(&copyValue, value, valueLen);
+	record->key = copyKey;
+	record->value = copyValue;
+	return record;
+}
+
+static void freeRecord(Record *record){
+	if(record->key!=NULL){
+		free(record->key);
+	}
+	if(record->value!=NULL){
+		free(record->value);
+	}
+	free(record);
+}
+
+static void freeLRUCacheRecords(LRUCache* cache){
+	LRUNode* node = cache->head;
+	while ((node = node->next) != cache->head){
+		Record *record = (Record *)node->value;
+		freeRecord(record);
+	}
+}
 
 HashEngine *makeHashEngine(const char *filename, uint32 hashMapCap, uint64 cacheCap){
 	//创建文件并打开文件描述符
@@ -108,7 +171,7 @@ HashEngine *makeHashEngine(const char *filename, uint32 hashMapCap, uint64 cache
 	engine->newFilename = NULL;
 	engine->wfd = wfd;
 	engine->rfd = rfd;
-	engine->newrfd = 0;
+	engine->newrfd = -1;
 	engine->idSeed = 1; //不能以0为起点
 	engine->hashMap = makeHashMap(hashMapCap);
 	engine->freezeHashMap = NULL;
@@ -124,34 +187,90 @@ HashEngine *makeHashEngine(const char *filename, uint32 hashMapCap, uint64 cache
 	return engine;
 }
 
-HashEngine *loadHashEngine(const char *filename, uint32 hashMapCap, uint64 cacheCap){
+static void* setRecordLocationIdAs0(struct Entry * entry, void* args){
+	((RecordLocation*) entry->value)->id = 0;
 	return NULL;
 }
 
-static RecordLocation* makeRecordLocation(uint64 id, uint64 position){
-	RecordLocation *location = (RecordLocation *)malloc(sizeof(RecordLocation));
-	location->id = id;
-	location->position = 0;
-	return location;
+HashEngine *loadHashEngine(const char *filename, uint32 hashMapCap, uint64 cacheCap){
+	//创建文件并打开文件描述符
+	int wfd = openHashFile(filename);
+	int rfd = openHashFile(filename);
+	if (wfd == -1 || rfd == -1)
+	{
+		return NULL;
+	}
+	//验证元数据
+	if (!verifyMetadata(wfd))
+	{
+		return NULL;
+	}
+	//创建对象
+	HashEngine *engine = (HashEngine *)malloc(sizeof(HashEngine));
+	engine->filename = (char *)malloc(sizeof(char) * (strlen(filename) + 1));
+	strcpy(engine->filename, filename);
+	engine->newFilename = NULL;
+	engine->wfd = wfd;
+	engine->rfd = rfd;
+	engine->newrfd = -1;
+	engine->idSeed = 1; //不能以0为起点
+	engine->hashMap = makeHashMap(hashMapCap);
+	engine->freezeHashMap = NULL;
+	engine->readCache = makeLRUCache(cacheCap, 8); //每一个KEY对应一个唯一ID，从1开始
+	engine->writeCache = makeLRUCache(cacheCap, 8);
+	engine->freezeWriteCache = makeLRUCache(cacheCap, 8);
+	engine->persistenceStatus = None; //没有进行持久化
+	//初始化线程相关内容
+	pthread_cond_init(&engine->statusCond, NULL);
+	pthread_mutexattr_init(&engine->statusAttr);
+	pthread_mutexattr_settype(&engine->statusAttr, PTHREAD_MUTEX_RECURSIVE_NP);
+	pthread_mutex_init(&engine->statusMutex, &engine->statusAttr);
+	//读取数据文件，创建内存索引
+	uint64 position = 8; //初始化为第一个数据段的位置
+	uint64 fileSize = lseek(rfd, 0, SEEK_END);
+	while(position<fileSize){
+		Record* record = loadRecord(rfd, position, 1);
+		RecordLocation* loaction = getHashMap(engine->hashMap, record->keyLen, record->key);
+		if(loaction==NULL){
+			loaction = makeRecordLocation(record->version, position); //先用id存放版本号
+			putHashMap(engine->hashMap, record->keyLen, record->key, loaction);
+		} else {
+			if(loaction->id < record->version){
+				loaction->position = position;
+				loaction->id = record->version;
+			}
+		}
+		freeRecord(record);
+		position += 8 + 4 + 4 + record->keyLen + record->valueLen;
+	}
+	//恢复HashMap中的id为0
+	foreachHashMap(engine->hashMap, setRecordLocationIdAs0, NULL);
+	return engine;
 }
 
-static Record *makeRecord(uint64 version, uint32 keyLen, uint32 valueLen, uint8 * key, uint8 * value){
-	Record *record = (Record*) malloc(sizeof(Record));
-	record->version = version;
-	record->keyLen = keyLen;
-	record->valueLen = valueLen;
-	uint8* copyKey, *copyValue;
-	newAndCopyByteArray(&copyKey, key, keyLen);
-	newAndCopyByteArray(&copyValue, value, valueLen);
-	record->key = copyKey;
-	record->value = copyValue;
-	return record;
-}
-
-static void freeRecord(Record *record){
-	free(record->key);
-	free(record->value);
-	free(record);
+void freeHashEngine(HashEngine* engine){
+	startPersistenceThread(engine);
+	pthread_join(engine->persistenceThread, NULL);
+	free(engine->filename);
+	if(engine->newFilename!=NULL){
+		free(engine->newFilename);
+	}
+	close(engine->wfd);
+	close(engine->rfd);
+	if(engine->newrfd!=-1){
+		close(engine->newrfd);
+	}
+	foreachHashMap(engine->hashMap, freeHashMapRecordLocation, NULL);
+	freeHashMap(engine->hashMap);
+	if(engine->freezeHashMap!=NULL){
+		foreachHashMap(engine->freezeHashMap, freeHashMapRecordLocation, NULL);
+		freeHashMap(engine->freezeHashMap);
+	}
+	freeLRUCacheRecords(engine->writeCache);
+	freeLRUCache(engine->writeCache);
+	freeLRUCacheRecords(engine->freezeWriteCache);
+	freeLRUCache(engine->freezeWriteCache);
+	free(engine);
 }
 
 /*****************************************************************************
@@ -170,19 +289,7 @@ static void putToReadCache(HashEngine* engine, uint64 id, Record* record){
 static void putToWriteCache(HashEngine* engine, uint64 id, Record* record){
 
 	if(engine->writeCache->size>=engine->writeCache->capacity){
-		//启动持久化线程
-		pthread_cleanup_push((void *)pthread_mutex_unlock, &engine->statusMutex);
-		pthread_mutex_lock(&engine->statusMutex);
-		while(engine->persistenceStatus!=None){
-			pthread_cond_wait(&engine->statusCond, &engine->statusMutex);
-		}
-		LRUCache * tmp = engine->writeCache;
-		engine->writeCache = engine->freezeWriteCache;
-		engine->freezeWriteCache = tmp;
-		engine->persistenceStatus = Doing;
-		pthread_mutex_unlock(&engine->statusMutex);
-		pthread_cleanup_pop(0);
-		pthread_create(&engine->persistenceThread, NULL, (void *)flushHashEngine, (void *)engine);
+		startPersistenceThread(engine);
 	}
 	putLRUCache(engine->writeCache, (uint8*)&id, record);
 }
@@ -232,7 +339,7 @@ int32 putHashEngine(HashEngine *engine, uint32 keyLen, uint8 *key, uint32 valueL
 	if(record==NULL){
 		pthread_cleanup_push((void *)pthread_mutex_unlock, &engine->statusMutex);
 		pthread_mutex_lock(&engine->statusMutex);
-		if ((record = (Record *)getLRUCache(engine->writeCache, (uint8 *)&location->id)) != NULL)
+		if ((record = (Record *)removeLRUCache(engine->writeCache, (uint8 *)&location->id)) != NULL)
 		{
 			free(record->value);
 			record->version++;
@@ -255,6 +362,8 @@ int32 putHashEngine(HashEngine *engine, uint32 keyLen, uint8 *key, uint32 valueL
 			{
 				//重新创建一个记录
 				record = makeRecord(record->version+1, record->keyLen, valueLen, record->key, value);
+				//更新id
+				location->id = engine->idSeed++;
 			}
 		} else if(engine->persistenceStatus == After){
 			//另外的线程正在进行清理内存，wait
@@ -288,8 +397,8 @@ Array getHashEngine(HashEngine *engine, uint32 keyLen, uint8 *key){
 	//不在内存中：从磁盘中读
 	if(location->id==0){
 		record = loadRecord(engine->rfd, location->position, 0);
-		putToReadCache(engine, location->id, record);
 		location->id = engine->idSeed++;
+		putToReadCache(engine, location->id, record);
 	}
 
 	//从内存中读
@@ -304,22 +413,25 @@ Array getHashEngine(HashEngine *engine, uint32 keyLen, uint8 *key){
 		pthread_mutex_unlock(&engine->statusMutex);
 		pthread_cleanup_pop(0);
 	}
+	pthread_cleanup_push((void *)pthread_mutex_unlock, &engine->statusMutex);
+	pthread_mutex_lock(&engine->statusMutex);
 	//说明在freezeWriteCache中
 	if(record==NULL){
-		pthread_cleanup_push((void *)pthread_mutex_unlock, &engine->statusMutex);
-		pthread_mutex_lock(&engine->statusMutex);
 		if(engine->persistenceStatus == Doing){
 			record = (Record *)getLRUCacheNoChange(engine->freezeWriteCache, (uint8 *)&location->id);
 		} else if(engine->persistenceStatus == After){
 			//另外的线程正在进行清理资源，wait
 			pthread_cond_wait(&engine->statusCond, &engine->statusMutex);
 		}
-		pthread_mutex_unlock(&engine->statusMutex);
-		pthread_cleanup_pop(0);
 	}
+	//以下代码也需要在临界区内，防止来自freezeWriteCache的record被释放
 	if(record!=NULL){
 		newAndCopyByteArray((uint8**)&arr.array, record->value, record->valueLen);
 		arr.length = record->valueLen;
+	}
+	pthread_mutex_unlock(&engine->statusMutex);
+	pthread_cleanup_pop(0);
+	if(record!=NULL){
 		return arr;
 	}
 	return getHashEngine(engine, keyLen, key);
@@ -360,7 +472,10 @@ void flushHashEngine(HashEngine* engine){
 	while ((node = node->next) != freezeCache->head){
 		Record *record = (Record *)node->value;
 		RecordLocation *location = getHashMap(engine->hashMap, record->keyLen, record->key);
-		location->id = 0;
+		if (*(uint64 *)node->key == location->id){
+			//不相等说明，writecache中存在一个副本，不能清零，避免覆盖
+			location->id = 0;
+		}
 		//此时：id == 0 && position ！= 0
 		freeRecord(record);
 	}

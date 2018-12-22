@@ -55,6 +55,6 @@ Mkfile.old
 dkms.conf
 
 # 程序定义的文件
-.idx
-.hashengine
-.redolog
+*.idx
+*.hashengine
+*.redolog

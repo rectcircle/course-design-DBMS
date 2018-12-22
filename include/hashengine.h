@@ -141,6 +141,11 @@ HashEngine *makeHashEngine(const char *filename, uint32 hashMapCap, uint64 cache
  */
 HashEngine *loadHashEngine(const char *filename, uint32 hashMapCap, uint64 cacheCap);
 
+/**
+ * 释放HashEngine
+ */
+void freeHashEngine(HashEngine* engine);
+
 /*****************************************************************************
  * 增删查（改通过查删增实现）
  ******************************************************************************/

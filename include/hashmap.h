@@ -28,7 +28,7 @@
 
 struct Entry; //去除警告用
 
-typedef void* (*ForeachMapFunction)(struct Entry *, void* args);
+typedef void* (*ForeachMapFunction)(struct Entry * entry, void* args);
 
 /*****************************************************************************
  * 结构定义
