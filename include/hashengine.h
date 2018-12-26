@@ -87,8 +87,6 @@ typedef struct HashEngine
 {
 	/** 索引文件位置 */
 	char *filename;
-	/** 进行文件碎片整理时产生的文件 */
-	char *newFilename;
 	/** 数据文件描述符，用于写，没有进行碎片整理时指向filename, 进行碎片整理时指向newFilename */
 	int wfd;
 	/** 数据文件描述符，用于读，指向filename */
@@ -99,8 +97,6 @@ typedef struct HashEngine
 	uint64 idSeed;
 	/** filename的索引 <key, RecordLocation> */
 	struct HashMap *hashMap;
-	/** freezeHashMap被冻结的索引*/
-	struct HashMap *freezeHashMap;
 	/** 读缓存 <RecordLocation.id, Record> */
 	struct LRUCache *readCache;
 	/** 写缓存（工作中） <RecordLocation.id, Record>*/
@@ -109,6 +105,16 @@ typedef struct HashEngine
 	struct LRUCache *freezeWriteCache;
 	/** 持久化状态 */
 	enum HashEnginePersistenceStatus persistenceStatus;
+	/** 重做日志相关配置：内存最大持久尺寸 */
+	uint64 operateListMaxSize;
+	/** 重做日志相关配置：重做日志刷新策略 */
+	enum RedoFlushStrategy flushStrategy;
+	/** 重做日志相关配置：重做日志刷新策略参数 */
+	uint64 flushStrategyArg;
+	/** 工作中的RedoLog */
+	struct RedoLog *redoLogWork;
+	/** 冻结的RedoLog */
+	struct RedoLog *redoLogFreeze;
 	/** 条件变量，用于控制并发 */
 	pthread_cond_t statusCond;
 	/** 用于互斥更改状态 */

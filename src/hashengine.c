@@ -23,7 +23,7 @@
 static const uint32 MAGIC_NUMBER = 0x960729abu;
 
 /*****************************************************************************
- * 私有函数：文件操作、序列化、反序列化、线程启动函数
+ * 私有函数：文件操作、序列化、反序列化、线程启动函数、日志处理回调函数
  ******************************************************************************/
 
 static int createHashFile(const char *filename)
@@ -103,9 +103,48 @@ static void startPersistenceThread(HashEngine* engine){
 	pthread_create(&engine->persistenceThread, NULL, (void *)flushHashEngine, (void *)engine);
 }
 
+static void hashEngineRedoLogPersistenceFunction(RedoLog* redoLog, OperateTuple *op){
+	//TODO 
+	HashEngine *indexEngine = (HashEngine *)redoLog->env;
+	int len = 1 + indexEngine->treeMeta.keyLen;
+	if(op->objects->length==2){
+		len += indexEngine->treeMeta.valueLen;
+	}
+	char *buffer = malloc(len);
+	operateTupleToBuffer(indexEngine, op, buffer);
+	write(redoLog->fd, buffer, len);
+	// pthread_testcancel();
+	free(buffer);
+}
+
 /*****************************************************************************
  *构造、析构函数
  ******************************************************************************/
+
+static void freeHashEngineOperateTuple(OperateTuple *operateTuple){
+	//TODO
+	if(operateTuple->objects!=NULL){
+		ListNode *node = NULL;
+		ListNode *tmp = operateTuple->objects->head;
+		while ((node = tmp) != NULL)
+		{
+			tmp = node->next;
+			free(node->value);
+		}
+	}
+	freeList(operateTuple->objects);
+	free(operateTuple);
+}
+
+static RedoLog* makeHashEngineRedoLog(HashEngine* engine){
+	//TODO 
+	char *filename = malloc(strlen(engine->filename)+30);
+	sprintf(filename, "%s_0x%016llx.redolog", engine->filename, engine->nextNodeVersion);
+	return makeRedoLog(filename, (void *)engine, engine->operateListMaxSize,
+					   hashEngineRedoLogPersistenceFunction,
+					   freeHashEngineOperateTuple,
+					   engine->flushStrategy, engine->flushStrategyArg);
+}
 
 static RecordLocation* makeRecordLocation(uint64 id, uint64 position){
 	RecordLocation *location = (RecordLocation *)malloc(sizeof(RecordLocation));
@@ -168,17 +207,16 @@ HashEngine *makeHashEngine(const char *filename, uint32 hashMapCap, uint64 cache
 	HashEngine* engine = (HashEngine*)malloc(sizeof(HashEngine));
 	engine->filename = (char *)malloc(sizeof(char) * (strlen(filename) + 1));
 	strcpy(engine->filename, filename);
-	engine->newFilename = NULL;
 	engine->wfd = wfd;
 	engine->rfd = rfd;
-	engine->newrfd = -1;
 	engine->idSeed = 1; //不能以0为起点
 	engine->hashMap = makeHashMap(hashMapCap);
-	engine->freezeHashMap = NULL;
 	engine->readCache = makeLRUCache(cacheCap, 8); //每一个KEY对应一个唯一ID，从1开始
 	engine->writeCache = makeLRUCache(cacheCap, 8);
 	engine->freezeWriteCache = makeLRUCache(cacheCap, 8);
 	engine->persistenceStatus = None; //没有进行持久化
+	//TODO 重做日志内容
+
 	//初始化线程相关内容
 	pthread_cond_init(&engine->statusCond, NULL);
 	pthread_mutexattr_init(&engine->statusAttr);
@@ -209,13 +247,10 @@ HashEngine *loadHashEngine(const char *filename, uint32 hashMapCap, uint64 cache
 	HashEngine *engine = (HashEngine *)malloc(sizeof(HashEngine));
 	engine->filename = (char *)malloc(sizeof(char) * (strlen(filename) + 1));
 	strcpy(engine->filename, filename);
-	engine->newFilename = NULL;
 	engine->wfd = wfd;
 	engine->rfd = rfd;
-	engine->newrfd = -1;
 	engine->idSeed = 1; //不能以0为起点
 	engine->hashMap = makeHashMap(hashMapCap);
-	engine->freezeHashMap = NULL;
 	engine->readCache = makeLRUCache(cacheCap, 8); //每一个KEY对应一个唯一ID，从1开始
 	engine->writeCache = makeLRUCache(cacheCap, 8);
 	engine->freezeWriteCache = makeLRUCache(cacheCap, 8);
@@ -252,20 +287,10 @@ void freeHashEngine(HashEngine* engine){
 	startPersistenceThread(engine);
 	pthread_join(engine->persistenceThread, NULL);
 	free(engine->filename);
-	if(engine->newFilename!=NULL){
-		free(engine->newFilename);
-	}
 	close(engine->wfd);
 	close(engine->rfd);
-	if(engine->newrfd!=-1){
-		close(engine->newrfd);
-	}
 	foreachHashMap(engine->hashMap, freeHashMapRecordLocation, NULL);
 	freeHashMap(engine->hashMap);
-	if(engine->freezeHashMap!=NULL){
-		foreachHashMap(engine->freezeHashMap, freeHashMapRecordLocation, NULL);
-		freeHashMap(engine->freezeHashMap);
-	}
 	freeLRUCacheRecords(engine->writeCache);
 	freeLRUCache(engine->writeCache);
 	freeLRUCacheRecords(engine->freezeWriteCache);
