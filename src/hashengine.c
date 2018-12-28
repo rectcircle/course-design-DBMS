@@ -13,11 +13,13 @@
 #include "lrucache.h"
 #include "util.h"
 #include "global.h"
+#include "redolog.h"
 
 #include <malloc.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <dirent.h>
 
 //魔数
 static const uint32 MAGIC_NUMBER = 0x960729abu;
@@ -87,6 +89,7 @@ static Record *loadRecord(int rfd, uint64 position, int skipValue){
 	return record;
 }
 
+static RedoLog* createHashEngineRedoLog(HashEngine* engine);
 static void startPersistenceThread(HashEngine* engine){
 	//启动持久化线程
 	pthread_cleanup_push((void *)pthread_mutex_unlock, &engine->statusMutex);
@@ -94,59 +97,160 @@ static void startPersistenceThread(HashEngine* engine){
 	while(engine->persistenceStatus!=None){
 		pthread_cond_wait(&engine->statusCond, &engine->statusMutex);
 	}
+	//切换写缓存
 	LRUCache * tmp = engine->writeCache;
 	engine->writeCache = engine->freezeWriteCache;
 	engine->freezeWriteCache = tmp;
+	// //切换并创建新的重做日志
+	// if(engine->redoLogWork !=NULL){
+	// 	engine->redoLogFreeze = engine->redoLogWork;
+	// 	engine->redoLogWork = createHashEngineRedoLog(engine);
+	// }
 	engine->persistenceStatus = Doing;
 	pthread_mutex_unlock(&engine->statusMutex);
 	pthread_cleanup_pop(0);
 	pthread_create(&engine->persistenceThread, NULL, (void *)flushHashEngine, (void *)engine);
 }
 
+
+//写一条日志到文件中
 static void hashEngineRedoLogPersistenceFunction(RedoLog* redoLog, OperateTuple *op){
-	//TODO 
-	HashEngine *indexEngine = (HashEngine *)redoLog->env;
-	int len = 1 + indexEngine->treeMeta.keyLen;
-	if(op->objects->length==2){
-		len += indexEngine->treeMeta.valueLen;
+	// 如果操作对象长度不为2出错
+	if (op->objects->length!=2){
+		return;
 	}
-	char *buffer = malloc(len);
-	operateTupleToBuffer(indexEngine, op, buffer);
-	write(redoLog->fd, buffer, len);
-	// pthread_testcancel();
-	free(buffer);
+	// 写入操作类型
+	write(redoLog->fd, (void*)&op->type, 1);
+	// 获取并kv
+	Array* key = (Array*)op->objects->head->value;
+	Array* value = (Array*)op->objects->head->next->value;
+	Array* objects[2] = {key, value};
+	for(int i = 0; i<2; i++){
+		if(i==1&& op->type==2){ //对于删除不需要写
+			break;
+		}
+		Array* arr = objects[i];
+		uint32 arrLen = htonl(arr->length);
+		write(redoLog->fd, (uint8*)&arrLen, 4);
+		write(redoLog->fd, arr->array, arr->length);
+	}
 }
 
 /*****************************************************************************
  *构造、析构函数
  ******************************************************************************/
 
-static void freeHashEngineOperateTuple(OperateTuple *operateTuple){
-	//TODO
-	if(operateTuple->objects!=NULL){
-		ListNode *node = NULL;
-		ListNode *tmp = operateTuple->objects->head;
-		while ((node = tmp) != NULL)
-		{
-			tmp = node->next;
-			free(node->value);
-		}
+//重做日志相关函数：创建操作元组
+//结构为OperateTuple{type=1|2, objects:List{Array{length=keyLen, array=key} } }
+static OperateTuple *makeHashEngineOperateTuple(HashEngine *engine, uint8 type, uint32 keyLen, uint8 *key, uint32 valueLen, uint8 *value){
+	OperateTuple *op = (OperateTuple *)malloc(sizeof(OperateTuple));
+	op->type = type;
+	op->objects = makeList();
+
+	Array *keyArr = (Array*)malloc(sizeof(Array));
+	keyArr->length = keyLen;
+	newAndCopyByteArray((uint8**)&keyArr->array, key, keyArr->length);
+	addList(op->objects, (void *)keyArr);
+
+	if(type==1){
+		Array *valueArr = (Array *)malloc(sizeof(Array));
+		valueArr->length = valueLen;
+		newAndCopyByteArray((uint8**)&valueArr->array, value, valueArr->length);
+		addList(op->objects, (void *)valueArr);
 	}
-	freeList(operateTuple->objects);
-	free(operateTuple);
+	
+	return op;
 }
 
-static RedoLog* makeHashEngineRedoLog(HashEngine* engine){
-	//TODO 
+//重做日志相关函数：释放操作元组占用内存
+static void freeHashEngineOperateTuple(OperateTuple *op){
+	Array *key = (Array *)op->objects->head->value;
+	free(key->array);
+	free(key);
+	if(op->type==1){
+		Array *value = (Array *)op->objects->head->next->value;
+		free(value->array);
+		free(value);
+	}
+	freeList(op->objects);
+	free(op);
+}
+
+static RedoLog* createHashEngineRedoLog(HashEngine* engine){
 	char *filename = malloc(strlen(engine->filename)+30);
-	sprintf(filename, "%s_0x%016llx.redolog", engine->filename, engine->nextNodeVersion);
+	sprintf(filename, "%s_0x%016llx.redolog", engine->filename, engine->redoVersion++);
 	return makeRedoLog(filename, (void *)engine, engine->operateListMaxSize,
 					   hashEngineRedoLogPersistenceFunction,
 					   freeHashEngineOperateTuple,
 					   engine->flushStrategy, engine->flushStrategyArg);
 }
 
-static RecordLocation* makeRecordLocation(uint64 id, uint64 position){
+//从当前hash引擎所在路径中搜索Hash重做日志文件加载并删除
+static RedoLog *loadHashEngineRedoLog(HashEngine *engine){
+
+
+	char *pathname = NULL;
+	char *redoLogFilename = NULL;
+	char *filename = NULL;
+
+	if (engine->filename[0]=='/'){
+		//绝对目录
+		pathname = malloc(strlen(engine->filename) + 1);
+		filename = malloc(strlen(engine->filename) + 1);
+		strcpy(pathname, engine->filename);
+		strcpy(filename, engine->filename);
+		for (int i = strlen(pathname) - 1; i >= 0; i--)
+		{
+			if (pathname[i] == '/')
+			{
+				pathname[i] = '\0';
+				break;
+			}
+		}
+	} else {
+		pathname = getcwd(NULL, 0);
+		filename = malloc(strlen(pathname) + 1 + strlen(engine->filename) + 1);
+		sprintf(filename, "%s/%s", pathname, engine->filename);
+	}
+
+	DIR *dir;
+	struct dirent *ptr;
+	dir = opendir(pathname);
+
+	while ((ptr=readdir(dir)) != NULL)
+	{
+		if(strcmp(ptr->d_name,".")==0 || strcmp(ptr->d_name,"..")==0) {    ///current dir OR parrent dir
+			continue;
+		} else if (ptr->d_type == 8) { ///file
+			char *nowFilename = malloc(strlen(filename) + 30);
+			sprintf(nowFilename, "%s/%s", pathname, ptr->d_name);
+			if (strlen(nowFilename) <= strlen(filename) || strncmp(filename, nowFilename, strlen(filename)) !=0){
+				continue;
+			}
+			if (redoLogFilename==NULL){
+				redoLogFilename = nowFilename;
+				continue;
+			}
+			if(strcmp(nowFilename, redoLogFilename)>0){
+				unlink(redoLogFilename);
+				free(redoLogFilename);
+				redoLogFilename = nowFilename;
+				continue;
+			}
+			free(nowFilename);
+		}
+	}
+	if(redoLogFilename==NULL){
+		return NULL;
+	}
+	return loadRedoLog(redoLogFilename, (void *)engine, engine->operateListMaxSize,
+					   hashEngineRedoLogPersistenceFunction,
+					   freeHashEngineOperateTuple,
+					   engine->flushStrategy, engine->flushStrategyArg);
+}
+
+	static RecordLocation *makeRecordLocation(uint64 id, uint64 position)
+{
 	RecordLocation *location = (RecordLocation *)malloc(sizeof(RecordLocation));
 	location->id = id;
 	location->position = position;
@@ -193,7 +297,11 @@ static void freeLRUCacheRecords(LRUCache* cache){
 	}
 }
 
-HashEngine *makeHashEngine(const char *filename, uint32 hashMapCap, uint64 cacheCap){
+HashEngine *makeHashEngine(const char *filename, uint32 hashMapCap, uint64 cacheCap,
+						   uint64 operateListMaxSize,
+						   enum RedoFlushStrategy flushStrategy,
+						   uint64 flushStrategyArg)
+{
 	//创建文件并打开文件描述符
 	int wfd = createHashFile(filename);
 	int rfd = openHashFile(filename);
@@ -215,8 +323,13 @@ HashEngine *makeHashEngine(const char *filename, uint32 hashMapCap, uint64 cache
 	engine->writeCache = makeLRUCache(cacheCap, 8);
 	engine->freezeWriteCache = makeLRUCache(cacheCap, 8);
 	engine->persistenceStatus = None; //没有进行持久化
-	//TODO 重做日志内容
-
+	// //重做日志内容
+	// engine->operateListMaxSize = operateListMaxSize;
+	// engine->flushStrategy = flushStrategy;
+	// engine->flushStrategyArg = flushStrategyArg;
+	// engine->redoVersion = 1;
+	// engine->redoLogWork = createHashEngineRedoLog(engine);
+	// engine->redoLogFreeze = NULL;
 	//初始化线程相关内容
 	pthread_cond_init(&engine->statusCond, NULL);
 	pthread_mutexattr_init(&engine->statusAttr);
@@ -230,7 +343,40 @@ static void* setRecordLocationIdAs0(struct Entry * entry, void* args){
 	return NULL;
 }
 
-HashEngine *loadHashEngine(const char *filename, uint32 hashMapCap, uint64 cacheCap){
+static int exceHashEngineRedoLog(HashEngine* engine, RedoLog *redoLog){
+	uint8 type = 0;
+	lseek(redoLog->fd, 0, SEEK_SET);
+	while (read(redoLog->fd, &type, 1) > 0)
+	{
+		uint32 keyLen;
+		read(redoLog->fd, &keyLen, 4);
+		keyLen = ntohl(keyLen);
+		uint8* key = malloc(keyLen);
+		read(redoLog->fd, key, keyLen);
+		if(type==2){
+			removeHashEngine(engine, keyLen, key);
+			free(key);
+		} else if(type==1){
+			uint32 valueLen;
+			read(redoLog->fd, &valueLen, 4);
+			valueLen = ntohl(valueLen);
+			uint8 *value = malloc(valueLen);
+			read(redoLog->fd, value, valueLen);
+			putHashEngine(engine, keyLen, key, valueLen, value);
+			free(key);
+			free(value);
+		} else {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+HashEngine *loadHashEngine(const char *filename, uint32 hashMapCap, uint64 cacheCap,
+						   uint64 operateListMaxSize,
+						   enum RedoFlushStrategy flushStrategy,
+						   uint64 flushStrategyArg)
+{
 	//创建文件并打开文件描述符
 	int wfd = openHashFile(filename);
 	int rfd = openHashFile(filename);
@@ -255,6 +401,13 @@ HashEngine *loadHashEngine(const char *filename, uint32 hashMapCap, uint64 cache
 	engine->writeCache = makeLRUCache(cacheCap, 8);
 	engine->freezeWriteCache = makeLRUCache(cacheCap, 8);
 	engine->persistenceStatus = None; //没有进行持久化
+	// //重做日志内容
+	// engine->operateListMaxSize = operateListMaxSize;
+	// engine->flushStrategy = flushStrategy;
+	// engine->flushStrategyArg = flushStrategyArg;
+	// engine->redoVersion = 1;
+	// engine->redoLogWork = NULL;
+	// engine->redoLogFreeze = NULL;
 	//初始化线程相关内容
 	pthread_cond_init(&engine->statusCond, NULL);
 	pthread_mutexattr_init(&engine->statusAttr);
@@ -280,12 +433,24 @@ HashEngine *loadHashEngine(const char *filename, uint32 hashMapCap, uint64 cache
 	}
 	//恢复HashMap中的id为0
 	foreachHashMap(engine->hashMap, setRecordLocationIdAs0, NULL);
+	// //执行重做日志
+	// RedoLog* redoLog = loadHashEngineRedoLog(engine);
+	// if(redoLog!=NULL){
+	// 	if (!exceHashEngineRedoLog(engine, redoLog)){
+	// 		//TODO 内存泄露
+	// 		return NULL;
+	// 	}
+	// 	forceFreeRedoLogAndUnlink(redoLog);
+	// }
+	// //创建新的重做日志
+	// engine->redoLogWork = createHashEngineRedoLog(engine);
 	return engine;
 }
 
 void freeHashEngine(HashEngine* engine){
 	startPersistenceThread(engine);
 	pthread_join(engine->persistenceThread, NULL);
+	// forceFreeRedoLogAndUnlink(engine->redoLogWork);
 	free(engine->filename);
 	close(engine->wfd);
 	close(engine->rfd);
@@ -312,7 +477,6 @@ static void putToReadCache(HashEngine* engine, uint64 id, Record* record){
 }
 
 static void putToWriteCache(HashEngine* engine, uint64 id, Record* record){
-
 	if(engine->writeCache->size>=engine->writeCache->capacity){
 		startPersistenceThread(engine);
 	}
@@ -324,6 +488,10 @@ static void putToWriteCache(HashEngine* engine, uint64 id, Record* record){
  ******************************************************************************/
 
 int32 putHashEngine(HashEngine *engine, uint32 keyLen, uint8 *key, uint32 valueLen, uint8 *value){
+	// //添加到重做日志
+	// if(engine->redoLogWork!=NULL && valueLen==0){
+	// 	appendRedoLog(engine->redoLogWork, makeHashEngineOperateTuple(engine, 1, keyLen, key, valueLen, value));
+	// }
 	RecordLocation* location = (RecordLocation*) getHashMap(engine->hashMap, keyLen, key);
 	Record* record = NULL;
 	//不存在这个记录：创建
@@ -400,7 +568,6 @@ int32 putHashEngine(HashEngine *engine, uint32 keyLen, uint8 *key, uint32 valueL
 	//将这个记录写入writecache
 	if(record!=NULL){
 		putToWriteCache(engine, location->id, record);
-		//TODO 记录到重做日志
 		return 1;
 	}
 	//说明持久化线程已经完成，递归调用
@@ -463,6 +630,9 @@ Array getHashEngine(HashEngine *engine, uint32 keyLen, uint8 *key){
 }
 
 Array removeHashEngine(HashEngine *engine, uint32 keyLen, uint8 *key){
+	// if(engine->redoLogWork!=NULL){
+	// 	appendRedoLog(engine->redoLogWork, makeHashEngineOperateTuple(engine, 2, keyLen, key, 0, NULL));
+	// }
 	Array arr = getHashEngine(engine, keyLen, key);
 	if (arr.length!=0){
 		putHashEngine(engine, keyLen, key, 0, NULL);
@@ -479,7 +649,7 @@ void flushHashEngine(HashEngine* engine){
 	LRUCache *freezeCache = engine->freezeWriteCache;
 	LRUNode *node = freezeCache->head;
 	while ((node = node->next) != freezeCache->head){
-		//TODO indexengine也有这个BUG这边在遍历，另一边在查询，破会了链表结构
+		// 在遍历该缓存时，不能有其他线程进行LRU的访问，应为LRU访问会破坏链表结构
 		Record *record = (Record*)node->value;
 		uint64 position = writeRecord(engine->wfd, record);
 		RecordLocation* location = getHashMap(engine->hashMap, record->keyLen, record->key);
@@ -505,6 +675,7 @@ void flushHashEngine(HashEngine* engine){
 		freeRecord(record);
 	}
 	clearLRUCache(freezeCache);
+	// forceFreeRedoLogAndUnlink(engine->redoLogFreeze);
 	pthread_cleanup_push((void *)pthread_mutex_unlock, &engine->statusMutex);
 	pthread_mutex_lock(&engine->statusMutex);
 	engine->persistenceStatus = None;

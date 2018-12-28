@@ -13,11 +13,21 @@
 #include <unistd.h>
 #include <time.h>
 
+void cleanRedoLogFile(const char * engineFilename){
+	char *filename = malloc(strlen(engineFilename) + 30);
+	for(uint64 i=1; i<=1000; i++){
+		sprintf(filename, "%s_0x%016llx.redolog", engineFilename, i);
+		unlink(filename);
+	}
+	free(filename);
+}
+
 void testInMemery(){
 	printf("====测试在内存中增删改查====\n");
 	char *filename = "test.hashengine";
 	unlink(filename);
-	HashEngine* engine = makeHashEngine(filename, 10, 10);
+	cleanRedoLogFile(filename);
+	HashEngine *engine = makeHashEngine(filename, 10, 10, 3, synchronize, 0);
 	//测试key
 	uint8 keys[]    = {1, 2, 3, 4, 1, 2, 2, 2, 4, 4};
 	uint64 values[] = {1, 2, 3, 4, 1, 2, 0, 0, 6, 6};
@@ -49,11 +59,11 @@ void testInMemery(){
 	freeHashEngine(engine);
 }
 
-void testInDisk(){
-	printf("====测试在磁盘中增删改查====\n");
+HashEngine* writeToDisk(){
 	char *filename = "test.hashengine";
 	unlink(filename);
-	HashEngine* engine = makeHashEngine(filename, 10, 3);
+	cleanRedoLogFile(filename);
+	HashEngine *engine = makeHashEngine(filename, 10, 3, 3, synchronize, 0);
 	//测试key
 	uint8 keys[]    = {1, 2, 3, 4, 1, 2, 2, 2, 4, 4, 1, 5, 6, 7, 8, 9, 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 	uint64 values[] = {1, 2, 3, 4, 1, 2, 0, 0, 6, 6, 1, 5, 6, 7, 8, 9, 2, 1, 2, 3, 6, 5, 6, 7, 8, 9, 0};
@@ -82,14 +92,20 @@ void testInDisk(){
 			}
 		}
 	}
-	freeHashEngine(engine);
+	return engine;
+}
+
+void testInDisk(){
+	printf("====测试在磁盘中增删改查====\n");
+	freeHashEngine(writeToDisk());
 }
 
 void testLoadEngine(){
 	testInDisk();
 	printf("====测试在重新加载====\n");
 	char *filename = "test.hashengine";
-	HashEngine* engine = loadHashEngine(filename, 10, 3);
+	cleanRedoLogFile(filename);
+	HashEngine *engine = loadHashEngine(filename, 10, 3, 3, synchronize, 0);
 	//测试key
 	uint8 keys[]    = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 	uint64 values[] = {1, 2, 3, 6, 5, 6, 7, 8, 9, 0};
@@ -125,7 +141,8 @@ void testRandomOps(){
 	printf("====测试大量随机插入查找====\n");
 	char *filename = "test.hashengine";
 	unlink(filename);
-	HashEngine *engine = makeHashEngine(filename, 1000, 3);
+	cleanRedoLogFile(filename);
+	HashEngine *engine = makeHashEngine(filename, 1000, 3, 3, synchronize, 0);
 	int seed = (int)time(0);
 	// int seed = 1545464059;
 	printf("seed=%d\n", seed);

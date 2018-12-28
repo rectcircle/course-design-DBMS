@@ -96,6 +96,52 @@ static void persistenceTask(RedoLog* redoLog){
 	}
 }
 
+// static void persistenceTask(RedoLog* redoLog){
+// 	List *operateList = makeList();
+// 	while(1){
+// 		pthread_cleanup_push((void *)pthread_mutex_unlock, &redoLog->statusMutex);
+// 		pthread_mutex_lock(&redoLog->statusMutex);
+// 		pthread_testcancel();
+// 		//如果设置为finish状态，处理完剩余的直接结束
+// 		if (redoLog->status == finish){
+// 			addListToList(operateList, redoLog->operateList);
+// 			doPersistence(redoLog, operateList);
+// 			pthread_exit(NULL);
+// 		} else if(redoLog->status == normal){
+// 			if(checkNeedPersistence(redoLog)){
+// 				//如果需要进行持久化
+// 				//切换状态
+// 				redoLog->status = persistence;
+// 				//清空并拷贝列表
+// 				addListToList(operateList, redoLog->operateList);
+// 			} else {
+// 				//不需要进行持久化，wait
+// 				pthread_cond_wait(&redoLog->statusCond, &redoLog->statusMutex);
+// 				pthread_testcancel();
+// 			}
+// 		} else {
+// 			//None Todo
+// 		}
+// 		pthread_mutex_unlock(&redoLog->statusMutex);
+// 		pthread_cleanup_pop(0);
+
+// 		if(redoLog->status == persistence){
+// 			doPersistence(redoLog, operateList);
+// 			redoLog->lastFlushTime = currentTimeMillis();
+// 			pthread_cleanup_push((void *)pthread_mutex_unlock, &redoLog->statusMutex);
+// 			pthread_mutex_lock(&redoLog->statusMutex);
+// 			pthread_testcancel();
+// 			redoLog->status = normal;
+// 			// if(redoLog->flushStrategy==synchronize){
+// 			//同步策略立即通知工作线程
+// 			pthread_cond_signal(&redoLog->statusCond);
+// 			// }
+// 			pthread_mutex_unlock(&redoLog->statusMutex);
+// 			pthread_cleanup_pop(0);
+// 		}
+// 	}
+// }
+
 /** 初始化一个RedoLog，不包括打开文件 */
 static RedoLog *initRedoLog(
 	char *filename,
@@ -198,6 +244,33 @@ void appendRedoLog(RedoLog *redoLog, OperateTuple *ops){
 	pthread_cleanup_pop(0);
 }
 
+// void appendRedoLog(RedoLog *redoLog, OperateTuple *ops)
+// {
+// 	pthread_cleanup_push((void *)pthread_mutex_unlock, &redoLog->statusMutex);
+// 	pthread_mutex_lock(&redoLog->statusMutex);
+// 	if (redoLog->status == persistence)
+// 	{
+// 		pthread_cond_wait(&redoLog->statusCond, &redoLog->statusMutex);
+// 		addList(redoLog->operateList, (void *)ops);
+// 		pthread_cond_signal(&redoLog->statusCond);
+// 	}
+// 	else if (redoLog->status == normal)
+// 	{
+// 		if (redoLog->operateList->length >= redoLog->operateListMaxSize)
+// 		{
+// 			pthread_cond_wait(&redoLog->statusCond, &redoLog->statusMutex);
+// 		}
+// 		addList(redoLog->operateList, (void *)ops);
+// 		pthread_cond_signal(&redoLog->statusCond);
+// 	}
+// 	else
+// 	{
+// 		//None Todo
+// 	}
+// 	pthread_mutex_unlock(&redoLog->statusMutex);
+// 	pthread_cleanup_pop(0);
+// }
+
 void freeRedoLog(RedoLog *redoLog){
 	pthread_cleanup_push((void *)pthread_mutex_unlock, &redoLog->statusMutex);
 	pthread_mutex_lock(&redoLog->statusMutex);
@@ -220,11 +293,18 @@ void forceFreeRedoLog(RedoLog *redoLog){
 	free(redoLog);
 }
 
+static void operateListFreeForEach(void* value, void* args){
+	OperateTuple *operateTuple = (OperateTuple *)value;
+	RedoLog *redoLog = (RedoLog *)args;
+	redoLog->freeOperateTuple(operateTuple);
+}
+
 void forceFreeRedoLogAndUnlink(RedoLog *redoLog){
 	pthread_cancel(redoLog->persistenceThread);
 	close(redoLog->fd);
 	unlink(redoLog->filename);
 	free(redoLog->filename);
+	foreachList(redoLog->operateList, operateListFreeForEach, (void *)redoLog);
 	freeList(redoLog->operateList);
 	free(redoLog);
 }

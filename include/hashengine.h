@@ -27,6 +27,7 @@
 #include "util.h"
 #include "lrucache.h"
 #include "hashmap.h"
+#include "redolog.h"
 
 /*****************************************************************************
  * 宏定义
@@ -111,6 +112,8 @@ typedef struct HashEngine
 	enum RedoFlushStrategy flushStrategy;
 	/** 重做日志相关配置：重做日志刷新策略参数 */
 	uint64 flushStrategyArg;
+	/** 重做日志版本号 */
+	uint64 redoVersion;
 	/** 工作中的RedoLog */
 	struct RedoLog *redoLogWork;
 	/** 冻结的RedoLog */
@@ -136,7 +139,10 @@ typedef struct HashEngine
  * @param cacheCap 缓存容量
  * @return {HashEngine *} 一个HashEngine结构
  */
-HashEngine *makeHashEngine(const char *filename, uint32 hashMapCap, uint64 cacheCap);
+HashEngine *makeHashEngine(const char *filename, uint32 hashMapCap, uint64 cacheCap,
+						   uint64 operateListMaxSize,
+						   enum RedoFlushStrategy flushStrategy,
+						   uint64 flushStrategyArg);
 
 /**
  * 加载一个Hash引擎文件
@@ -145,7 +151,10 @@ HashEngine *makeHashEngine(const char *filename, uint32 hashMapCap, uint64 cache
  * @param cacheCap 缓存容量
  * @return {HashEngine *} 一个HashEngine结构
  */
-HashEngine *loadHashEngine(const char *filename, uint32 hashMapCap, uint64 cacheCap);
+HashEngine *loadHashEngine(const char *filename, uint32 hashMapCap, uint64 cacheCap,
+						   uint64 operateListMaxSize,
+						   enum RedoFlushStrategy flushStrategy,
+						   uint64 flushStrategyArg);
 
 /**
  * 释放HashEngine
