@@ -42,37 +42,37 @@ static char * genIndexfilename(const char*databasename, const char* tablename, c
 }
 
 SimpleDatabase *makeSimpleDatabase(const char *dirpath){
-	SimpleDatabase* database = malloc(sizeof(SimpleDatabase));
-	newAndCopyByteArray((uint8**)&database->dirpath, (uint8*)dirpath, strlen(dirpath)+1);
+	SimpleDatabase* dbms = malloc(sizeof(SimpleDatabase));
+	newAndCopyByteArray((uint8**)&dbms->dirpath, (uint8*)dirpath, strlen(dirpath)+1);
 	int hashMapSize = 1024;
 	int metadataHashMapCap = 1024;
 	int metadataCacheCap = 1024;
-	database->databaseMap = makeHashMap(hashMapSize);
-	database->dataMap = makeHashMap(hashMapSize);
-	database->indexMap = makeHashMap(hashMapSize);
+	dbms->databaseMap = makeHashMap(hashMapSize);
+	dbms->dataMap = makeHashMap(hashMapSize);
+	dbms->indexMap = makeHashMap(hashMapSize);
 	char *metadataPath = genMetadatapath(dirpath);
 	HashEngine* metadateHashEngine = makeHashEngine(metadataPath, metadataCacheCap, metadataHashMapCap, 1024, sizeThreshold, 1024);
-	putHashMap(database->dataMap, strlen(METADATA_KEY), (uint8*)METADATA_KEY,metadateHashEngine);
+	putHashMap(dbms->dataMap, strlen(METADATA_KEY), (uint8*)METADATA_KEY,metadateHashEngine);
 
 	free(metadataPath);
-	return database;
+	return dbms;
 }
 
-int createDatabase(SimpleDatabase *database, const char *databasename){
+int createDatabase(SimpleDatabase *dbms, const char *databasename){
 	int hashMapCap = 1024;
-	if(getHashMap(database->databaseMap, strlen(databasename), (uint8*) databasename)!=NULL){
+	if(getHashMap(dbms->databaseMap, strlen(databasename), (uint8*) databasename)!=NULL){
 		printf("数据库 %s 已存在", databasename);
 		return 0;
 	}
 	HashMap *tableMap = makeHashMap(hashMapCap);
-	putHashMap(database->databaseMap, strlen(databasename), (uint8*)databasename, tableMap);
+	putHashMap(dbms->databaseMap, strlen(databasename), (uint8*)databasename, tableMap);
 	return 1;
 }
 
-int createTable(SimpleDatabase *database, const char *databasename, const char *tablename, List *fields){
+int createTable(SimpleDatabase *dbms, const char *databasename, const char *tablename, List *fields){
 	int dataHashMapCap = 1024;
 	int dataCacheCap = 1024;
-	HashMap *tableMap = (HashMap*)getHashMap(database->databaseMap, strlen(databasename), (uint8*)databasename);
+	HashMap *tableMap = (HashMap*)getHashMap(dbms->databaseMap, strlen(databasename), (uint8*)databasename);
 	if(tableMap==NULL){
 		printf("请先创建数据库\n");
 		return 0;
@@ -102,10 +102,10 @@ int createTable(SimpleDatabase *database, const char *databasename, const char *
 	putHashMap(tableMap, strlen(tablename), (uint8*)tablename, fields);
 	//创建数据文件${databaseName}_${tableName}_table.hashengine
 	char * tableFilename = genTablefilename(databasename, tablename);
-	char * tableFilepath = genFullpath(database->dirpath, tableFilename);
+	char * tableFilepath = genFullpath(dbms->dirpath, tableFilename);
 	//创建HashEngine
 	HashEngine *tableData = makeHashEngine(tableFilepath, dataHashMapCap, dataCacheCap, 1024, sizeThreshold, 1024);
-	putHashMap(database->dataMap, strlen(tableFilename), (uint8 *)tableFilename, tableData);
+	putHashMap(dbms->dataMap, strlen(tableFilename), (uint8 *)tableFilename, tableData);
 	//循环创建索引文件
 	uint64 pageSize = 16*1024;
 	uint64 maxHeapSize = 0; //默认值
@@ -121,7 +121,7 @@ int createTable(SimpleDatabase *database, const char *databasename, const char *
 			isUnique = 0;
 		}
 		char *indexFilename = genIndexfilename(databasename, tablename, field->name);
-		char *indexFilepath = genFullpath(database->dirpath, indexFilename);
+		char *indexFilepath = genFullpath(dbms->dirpath, indexFilename);
 		// 创建索引引擎
 		IndexEngine *tableIndex = makeIndexEngine(
 			indexFilepath,
@@ -131,7 +131,7 @@ int createTable(SimpleDatabase *database, const char *databasename, const char *
 			isUnique,
 			maxHeapSize,
 			1024, sizeThreshold, 1024);
-		putHashMap(database->indexMap, strlen(indexFilename), (uint8 *)indexFilename, tableIndex);
+		putHashMap(dbms->indexMap, strlen(indexFilename), (uint8 *)indexFilename, tableIndex);
 		free(indexFilename);
 		free(indexFilepath);
 		node = node->next;
@@ -139,6 +139,23 @@ int createTable(SimpleDatabase *database, const char *databasename, const char *
 	free(tableFilename);
 	free(tableFilepath);
 	return 1;
+}
+
+/**
+ * 获取表定义
+ */
+List *getFieldDefinitions(SimpleDatabase *dbms, const char *databasename, const char *tablename){
+	HashMap *tableMap = (HashMap*)getHashMap(dbms->databaseMap, strlen(databasename), (uint8*)databasename);
+	if(tableMap==NULL){
+		printf("数据库 %s 不存在, 请先创建数据库\n", databasename);
+		return NULL;
+	}
+	List *fields = (List *)getHashMap(tableMap, strlen(tablename), (uint8 *)tablename);
+	if (fields == NULL){
+		printf("表 %s 不存在, 请先创建表\n", tablename);
+		return NULL;
+	}
+	return fields;
 }
 
 //检查数据是否合法
@@ -189,11 +206,12 @@ static List *checkAndDumpValues(List* fields, List* values){
 	return result;
 }
 
-static Array* dumpvaluesToBuffer(int32 len, List* fields, List*dumpvalues){
-	uint8* buffer = malloc(len);
+static Array* dumpvaluesToBuffer(int32 bufferLen, List* fields, List*dumpvalues){
+	uint8 *buffer = malloc(bufferLen);
 	Array* result = malloc(sizeof(Array));
-	result->length = len;
+	result->length = bufferLen;
 	result->array = buffer;
+	uint32 len = 0;
 	ListNode* node = dumpvalues->head;
 	ListNode *node1 = fields->head;
 	while (node != NULL) {
@@ -202,8 +220,8 @@ static Array* dumpvaluesToBuffer(int32 len, List* fields, List*dumpvalues){
 		if(field->type==FIELD_TYPE_STRING){
 			uint32 length = htonl(value->length);
 			memcpy(buffer + len, &length, 4);
+			len += 4;
 		}
-		len += 4;
 		memcpy(buffer+len, value->array, value->length);
 		len+=value->length;
 
@@ -213,16 +231,10 @@ static Array* dumpvaluesToBuffer(int32 len, List* fields, List*dumpvalues){
 	return result;
 }
 
-int insertRecord(SimpleDatabase *database, const char *databasename, const char *tablename, List *values){
+int insertRecord(SimpleDatabase *dbms, const char *databasename, const char *tablename, List *values){
 	//TODO 内存泄露
-	HashMap *tableMap = (HashMap*)getHashMap(database->databaseMap, strlen(databasename), (uint8*)databasename);
-	if(tableMap==NULL){
-		printf("数据库 %s 不存在, 请先创建数据库\n", databasename);
-		return 0;
-	}
-	List *fields = (List *)getHashMap(tableMap, strlen(tablename), (uint8 *)tablename);
-	if (tableMap == NULL){
-		printf("表 %s 不存在, 请先创建表\n", tablename);
+	List *fields = getFieldDefinitions(dbms, databasename, tablename);
+	if (fields == NULL){
 		return 0;
 	}
 	// List<Array{length, bytes}>
@@ -261,7 +273,7 @@ int insertRecord(SimpleDatabase *database, const char *databasename, const char 
 		//如果是索引, 写入索引文件
 		if(field->flag!=FIELD_FLAG_NORMAL){
 			char *indexFilename = genIndexfilename(databasename, tablename, field->name);
-			IndexEngine *indexEngine = (IndexEngine *) getHashMap(database->indexMap, strlen(indexFilename), (uint8*)indexFilename);
+			IndexEngine *indexEngine = (IndexEngine *) getHashMap(dbms->indexMap, strlen(indexFilename), (uint8*)indexFilename);
 			if (indexEngine==NULL){
 				printf("索引文件本应该存在, 但是缺失");
 				return 0;
@@ -277,7 +289,87 @@ int insertRecord(SimpleDatabase *database, const char *databasename, const char 
 	// 将数据 写入
 	Array * buffer = dumpvaluesToBuffer(len, fields, dumpvalues);
 	char *dataFilename = genTablefilename(databasename, tablename);
-	HashEngine *hashEngine = (HashEngine *)getHashMap(database->dataMap, strlen(dataFilename), (uint8*)dataFilename);
-	putHashEngine(hashEngine, strlen(primaryKeyValue), primaryKeyValue, buffer->length, buffer->array);
+	HashEngine *hashEngine = (HashEngine *)getHashMap(dbms->dataMap, strlen(dataFilename), (uint8*)dataFilename);
+	putHashEngine(hashEngine, primaryKeyField->length, primaryKeyValue, buffer->length, buffer->array);
 	return 1;
+}
+
+// Array* -> <List<void*>
+static List* parseRecord(List* fields, Array* hashResult){
+	List* result = makeList();
+	ListNode *node = fields->head;
+	uint32 len = 0;
+	uint8* values = (uint8*)hashResult->array;
+	while (node != NULL) {
+		FieldDefinition *field = (FieldDefinition *)node->value;
+		if(field->type==FIELD_TYPE_STRING){
+			//字符串类型
+			uint32 strLen = *(uint32*) (values+len);
+			len += 4;
+			strLen = ntohl(strLen);
+			char* value = calloc(1, strLen+1);
+			memcpy(value, values+len, strLen);
+			len += strLen;
+			addList(result, value);
+		} else {
+			if(field->length==1){
+				uint8 originNumber = *(uint8 *)(values + len);
+				uint8 *number = malloc(field->length);
+				*number = originNumber;
+				addList(result, number);
+			} else if (field->length==2){
+				uint16 originNumber = *(uint16 *)(values + len);
+				uint16 *number = malloc(field->length);
+				*number = ntohs(originNumber);
+				addList(result, number);
+			} else if(field->length==4){
+				uint32 originNumber = *(uint32 *)(values + len);
+				uint32 *number = malloc(field->length);
+				*number = ntohl(originNumber);
+				addList(result, number);
+			} else if(field->length==8){
+				uint64 originNumber = *(uint64 *)(values + len);
+				uint64 *number = malloc(field->length);
+				*number = htonll(originNumber);
+				addList(result, number);
+			}
+			len += field->length;
+		}
+		node = node->next;
+	}
+	return result;
+}
+
+List *searchRecord(SimpleDatabase *dbms, const char *databasename, const char *tablename, List *conditions){
+	//TODO 内存泄露
+	List *fields = getFieldDefinitions(dbms, databasename, tablename);
+	if (fields == NULL){
+		return NULL;
+	}
+	char *dataFilename = genTablefilename(databasename, tablename);
+	HashEngine *hashEngine = (HashEngine *)getHashMap(dbms->dataMap, strlen(dataFilename), (uint8 *)dataFilename);
+	//从Hash引擎拿到的数据
+	// List<Array*>
+	List* hashRecords = NULL;
+	if (conditions==NULL){
+		hashRecords = getAllHashEngine(hashEngine);
+	} else {
+		// 解析条件查询...
+		// 查询索引
+		// 循环查询Hash引擎
+	}
+
+	if(hashRecords==NULL){
+		return NULL;
+	}
+
+	//获取数据解析 List<Array*> -> List<List<void*>>
+	List* result = makeList();
+	ListNode* node = hashRecords->head;
+	while (node != NULL) {
+		List *record = parseRecord(fields, (Array *) node->value);
+		addList(result, record);
+		node = node->next;
+	}
+	return result;
 }

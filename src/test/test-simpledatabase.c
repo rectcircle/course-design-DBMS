@@ -21,11 +21,11 @@ void *printDatabaseItem(struct Entry *entry, void *args){
 	return NULL;
 }
 
-void showDatabases(SimpleDatabase* database){
+void showDatabases(SimpleDatabase* dbms){
 	printf("=================================\n");
-	printf("数据库数量: %d\n", database->databaseMap->size);
+	printf("数据库数量: %d\n", dbms->databaseMap->size);
 	printf("数据库名\t表数量\n");
-	foreachHashMap(database->databaseMap, printDatabaseItem, NULL);
+	foreachHashMap(dbms->databaseMap, printDatabaseItem, NULL);
 	printf("\n\n");
 }
 
@@ -37,8 +37,8 @@ void *printTableItem(struct Entry *entry, void *args){
 	return NULL;
 }
 
-void showTables(SimpleDatabase* database,  const char *databasename){
-	HashMap* tableMap = getHashMap(database->databaseMap, strlen(databasename), (uint8*)databasename);
+void showTables(SimpleDatabase* dbms,  const char *databasename){
+	HashMap* tableMap = getHashMap(dbms->databaseMap, strlen(databasename), (uint8*)databasename);
 	if(tableMap==NULL){
 		printf("数据库 %s 不存在\n\n\n", databasename);
 		return;
@@ -76,8 +76,8 @@ void *printFieldItem(void* value, void *args){
 	return NULL;
 }
 
-void showFields(SimpleDatabase* database,  const char *databasename, const char *tablename){
-	HashMap* tableMap = getHashMap(database->databaseMap, strlen(databasename), (uint8*)databasename);
+void showFields(SimpleDatabase* dbms,  const char *databasename, const char *tablename){
+	HashMap* tableMap = getHashMap(dbms->databaseMap, strlen(databasename), (uint8*)databasename);
 	if(tableMap==NULL){
 		printf("数据库 %s 不存在\n\n\n", databasename);
 		return;
@@ -90,6 +90,58 @@ void showFields(SimpleDatabase* database,  const char *databasename, const char 
 	printf("=================================\n");
 	printf("字段名\t类型\t索引类型\n");
 	foreachList(fields, printFieldItem, NULL);
+	printf("\n\n");
+}
+
+void showRecord( List* fields, List* value){
+	ListNode *node = fields->head;
+	ListNode *node1 = value->head;
+	while (node != NULL) {
+		FieldDefinition *field = (FieldDefinition*) node->value;
+		void* fiedlValue = node1->value;
+		if(field->type==FIELD_TYPE_STRING){
+			//字符串类型
+			printf("%s\t", (char *)fiedlValue);
+		} else {
+			if(field->length==1 || field->length==2 || field->length==4){
+				if(field->type==FIELD_TYPE_INT){
+					printf("%d\t", *(int32*) fiedlValue);
+				} else if(field->type==FIELD_TYPE_UINT){
+					printf("%u\t", *(uint32 *)fiedlValue);
+				}
+			} else if(field->length==8){
+				if(field->type==FIELD_TYPE_INT){
+					printf("%lld\t", *(int64 *)fiedlValue);
+				} else if(field->type==FIELD_TYPE_UINT){
+					printf("%llu\t", *(uint64 *)fiedlValue);
+				}
+			}
+		}
+		node = node->next;
+		node1 = node1->next;
+	}
+	printf("\n");
+}
+
+void showRecords(SimpleDatabase* dbms,  List* fields, List* values){
+	printf("=================================\n");
+	ListNode *node = fields->head;
+	while (node != NULL) {
+		FieldDefinition *field = (FieldDefinition*) node->value;
+		printf("%s\t", field->name);
+		node = node->next;
+	}
+	printf("\n");
+	node = values->head;
+	int recordLen = 0;
+	while (node != NULL){
+		recordLen++;
+		List *value = (List *)node->value;
+		showRecord(fields, value);
+		node = node->next;
+	}
+	printf("----\n");
+	printf("共查询到 %d 行\n", recordLen);
 	printf("\n\n");
 }
 
@@ -109,19 +161,19 @@ void cleanAndMakeDir(const char* path){
 void testInit(){
 	char* path ="/tmp/dbms";
 	cleanAndMakeDir(path);
-	SimpleDatabase* database = makeSimpleDatabase(path);
-	assertbool(database!=NULL, 1, "测试初始化");
+	SimpleDatabase* dbms = makeSimpleDatabase(path);
+	assertbool(dbms!=NULL, 1, "测试初始化");
 }
 
 void testCreateDatabase(){
 	char *databasenames[] = {"database1", "test", "project1"};
 	char *path = "/tmp/dbms";
 	cleanAndMakeDir(path);
-	SimpleDatabase *database = makeSimpleDatabase(path);
+	SimpleDatabase *dbms = makeSimpleDatabase(path);
 	for (int i = 0; i < sizeof(databasenames) / sizeof(databasenames[0]); i++){
-		createDatabase(database, databasenames[i]);
+		createDatabase(dbms, databasenames[i]);
 	}
-	showDatabases(database);
+	showDatabases(dbms);
 }
 
 List* makeTestFieldList(){
@@ -164,7 +216,7 @@ List* makeTestFieldList(){
 	//modify_time
 	FieldDefinition *modify_time = malloc(sizeof(FieldDefinition));
 	modify_time->flag = FIELD_FLAG_NORMAL;
-	modify_time->length = 8;
+	modify_time->length = 4;
 	modify_time->name = "modify_time";
 	modify_time->type = FIELD_TYPE_UINT;
 	addList(fields, modify_time);
@@ -177,19 +229,65 @@ void testCreateTable(){
 	char *tablename = "article";
 	List *fields = makeTestFieldList();
 	cleanAndMakeDir(path);
-	SimpleDatabase *database = makeSimpleDatabase(path);
-	createDatabase(database, databasename);
-	showDatabases(database);
-	createTable(database, databasename, tablename, fields);
-	showTables(database, databasename);
-	showFields(database, databasename, tablename);
+	SimpleDatabase *dbms = makeSimpleDatabase(path);
+	createDatabase(dbms, databasename);
+	showDatabases(dbms);
+	createTable(dbms, databasename, tablename, fields);
+	showTables(dbms, databasename);
+	showFields(dbms, databasename, tablename);
+}
 
+List* makeTestRecord(){
+	List *values = makeList();
+	//id
+	uint64* id = malloc(sizeof(uint64));
+	addList(values, id);
+	*id = 1;
+	//title
+	char* title = "article title";
+	addList(values, title);
+	//authorc
+	char* author = "rectcircle";
+	addList(values, author);
+	//content
+	char* content = "article content";
+	addList(values, content);
+	//create_time
+	uint32 *createTime = malloc(sizeof(uint32));
+	*createTime = 1546324158u;
+	addList(values, createTime);
+	//modify_time
+	uint32 *modifyTime = malloc(sizeof(uint32));
+	*modifyTime = 1546324158u;
+	addList(values, modifyTime);
+	return values;
+}
+
+
+
+void testInsertAndQueryTable(){
+	char *path = "/tmp/dbms";
+	char *databasename = "test";
+	char *tablename = "article";
+	List *fields = makeTestFieldList();
+	cleanAndMakeDir(path);
+	SimpleDatabase *dbms = makeSimpleDatabase(path);
+	createDatabase(dbms, databasename);
+	showDatabases(dbms);
+	createTable(dbms, databasename, tablename, fields);
+	showTables(dbms, databasename);
+	showFields(dbms, databasename, tablename);
+	List* values = makeTestRecord();
+	insertRecord(dbms, databasename,tablename, values);
+	List* result = searchRecord(dbms, databasename, tablename, NULL);
+	showRecords(dbms, fields, result);
 }
 
 TESTFUNC funcs[] = {
 	testInit,
 	testCreateDatabase,
 	testCreateTable,
+	testInsertAndQueryTable,
 };
 
 int main(int argc, char const *argv[])

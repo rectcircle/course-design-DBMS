@@ -574,12 +574,11 @@ int32 putHashEngine(HashEngine *engine, uint32 keyLen, uint8 *key, uint32 valueL
 	return putHashEngine(engine, keyLen, key, valueLen, value);
 }
 
-Array getHashEngine(HashEngine *engine, uint32 keyLen, uint8 *key){
+static Array getRecordByLocation(HashEngine *engine, RecordLocation *location){
 	Array arr;
 	arr.array = NULL;
 	arr.length = 0;
 
-	RecordLocation *location = (RecordLocation *)getHashMap(engine->hashMap, keyLen, key);
 	Record *record = NULL;
 
 	if(location==NULL){
@@ -626,7 +625,31 @@ Array getHashEngine(HashEngine *engine, uint32 keyLen, uint8 *key){
 	if(record!=NULL){
 		return arr;
 	}
-	return getHashEngine(engine, keyLen, key);
+	return getRecordByLocation(engine, location);
+}
+
+Array getHashEngine(HashEngine *engine, uint32 keyLen, uint8 *key){
+	RecordLocation *location = (RecordLocation *)getHashMap(engine->hashMap, keyLen, key);
+	return getRecordByLocation(engine, location);
+}
+
+void *eachLocationReadRecord(struct Entry *entry, void *args){
+	HashEngine *engine = (HashEngine *)((void **)args)[0];
+	List *result = (List*) ((void**)args)[1];
+	RecordLocation *location = (RecordLocation*)entry->value;
+	Array record = getRecordByLocation(engine, location);
+	Array* copy = malloc(sizeof(Array));
+	copy->length = record.length;
+	copy->array = record.array;
+	addList(result, copy);
+	return NULL;
+}
+
+List *getAllHashEngine(HashEngine *engine){
+	List* result = makeList();
+	void* args[2] = {engine, result};
+	foreachHashMap(engine->hashMap, eachLocationReadRecord, args);
+	return result;
 }
 
 Array removeHashEngine(HashEngine *engine, uint32 keyLen, uint8 *key){

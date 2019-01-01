@@ -32,7 +32,25 @@
 /** 普通索引字段 */
 #define FIELD_FLAG_INDEX_KEY 3
 
-/** table定义 */
+/** 等于 */
+#define RELOP_EQ 0
+/** 不等于 */
+#define RELOP_NEQ 1
+/** 小于 */
+#define RELOP_LT 2
+/** 小于等于 */
+#define RELOP_LTE 3
+/** 大于 */
+#define RELOP_GT 4
+/** 大于等于 */
+#define RELOP_GTE 5
+
+/** 逻辑且 */
+#define LOGOP_AND 0
+/** 逻辑或 */
+#define LOGOP_OR 1
+
+/** 字段定义 */
 typedef struct FieldDefinition
 {
 	/** 字段类型 */
@@ -44,6 +62,18 @@ typedef struct FieldDefinition
 	/** 字段名 */
 	char *name;
 } FieldDefinition;
+
+/** 查询条件定义 */
+typedef struct QueryCondition{
+	/** 字段名 */
+	char *name;
+	/** 关系运算符 */
+	uint8 relOp;
+	/** 比较值 */
+	void *value;
+	/** 逻辑运算符 */
+	uint8 logOp;
+} QueryCondition;
 
 typedef struct SimpleDatabase
 {
@@ -67,29 +97,44 @@ SimpleDatabase *makeSimpleDatabase(const char *dirpath);
 
 /**
  * 创建一个数据库
- * @param database
+ * @param dbms
  * @param databasename 数据库名
  * @return 创建成功返回1,否则返回0
  */
-int createDatabase(SimpleDatabase *database, const char *databasename);
+int createDatabase(SimpleDatabase *dbms, const char *databasename);
 
 /**
  * 创建一张表
- * @param database
+ * @param dbms
  * @param databasename 数据库名
  * @param tablename 表名
  * @param fields 字段列表
  */
-int createTable(SimpleDatabase *database, const char *databasename, const char *tablename, List *fields);
+int createTable(SimpleDatabase *dbms, const char *databasename, const char *tablename, List *fields);
 
+/**
+ * 获取表定义
+ */
+List *getFieldDefinitions(SimpleDatabase *dbms, const char *databasename, const char *tablename);
 
 /**
  * 向表中插入一条数据
- * @param database
+ * @param dbms
  * @param databasename 数据库名
  * @param tablename 表名
- * @param record 记录列表
+ * @param values 记录列表 List<void*>
  */
-int insertRecord(SimpleDatabase *database, const char *databasename, const char *tablename, List *record);
+int insertRecord(SimpleDatabase *dbms, const char *databasename, const char *tablename, List *values);
+
+/**
+ * 从表中查询记录
+ * TODO 目前仅支持单条件, 索引方式精确查找 和 查询全部
+ * @param dbms
+ * @param databasename 数据库名
+ * @param tablename 表名
+ * @param conditions 条件列表List<QueryCondition*>, NULL表示查询全部
+ * @return 值列表List<List<void*>>
+ */
+List* searchRecord(SimpleDatabase *dbms, const char *databasename, const char *tablename, List *conditions);
 
 #endif

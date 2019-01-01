@@ -174,6 +174,11 @@ void freeHashEngine(HashEngine* engine);
 Array getHashEngine(HashEngine *engine, uint32 keyLen, uint8 *key);
 
 /**
+ * 从Hash引擎中获取全部的数据
+ */
+List* getAllHashEngine(HashEngine *engine);
+
+/**
  * 从Hash引擎中查找key对应的value，只可能有一个
  * @param engine HashEngine
  * @param key 要查找的key
@@ -194,7 +199,6 @@ Array removeHashEngine(HashEngine *engine, uint32 keyLen, uint8 *key);
  * @param engine HashEngine
  */
 void flushHashEngine(HashEngine *engine);
-
 
 #ifdef PROFILE_TEST
 
