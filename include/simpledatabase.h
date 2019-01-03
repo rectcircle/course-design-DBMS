@@ -32,19 +32,6 @@
 /** 普通索引字段 */
 #define FIELD_FLAG_INDEX_KEY 3
 
-/** 等于 */
-#define RELOP_EQ 0
-/** 不等于 */
-#define RELOP_NEQ 1
-/** 小于 */
-#define RELOP_LT 2
-/** 小于等于 */
-#define RELOP_LTE 3
-/** 大于 */
-#define RELOP_GT 4
-/** 大于等于 */
-#define RELOP_GTE 5
-
 /** 逻辑且 */
 #define LOGOP_AND 0
 /** 逻辑或 */

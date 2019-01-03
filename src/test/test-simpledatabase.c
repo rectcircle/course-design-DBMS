@@ -237,12 +237,12 @@ void testCreateTable(){
 	showFields(dbms, databasename, tablename);
 }
 
-List* makeTestRecord(){
+List* makeTestRecord(int i){
 	List *values = makeList();
 	//id
 	uint64* id = malloc(sizeof(uint64));
 	addList(values, id);
-	*id = 1;
+	*id = i;
 	//title
 	char* title = "article title";
 	addList(values, title);
@@ -277,9 +277,37 @@ void testInsertAndQueryTable(){
 	createTable(dbms, databasename, tablename, fields);
 	showTables(dbms, databasename);
 	showFields(dbms, databasename, tablename);
-	List* values = makeTestRecord();
-	insertRecord(dbms, databasename,tablename, values);
+	for(int i=1; i<=10; i++){
+		List *values = makeTestRecord(i);
+		insertRecord(dbms, databasename, tablename, values);
+	}
 	List* result = searchRecord(dbms, databasename, tablename, NULL);
+	showRecords(dbms, fields, result);
+	List* conds = makeList();
+	uint64 minId = 4;
+	QueryCondition cond ={
+		"id",
+		RELOP_EQ,
+		&minId,
+		LOGOP_AND
+	};
+	addList(conds, &cond);
+	result = searchRecord(dbms, databasename, tablename, conds);
+	showRecords(dbms, fields, result);
+	cond.relOp = RELOP_NEQ;
+	result = searchRecord(dbms, databasename, tablename, conds);
+	showRecords(dbms, fields, result);
+	cond.relOp = RELOP_LT;
+	result = searchRecord(dbms, databasename, tablename, conds);
+	showRecords(dbms, fields, result);
+	cond.relOp = RELOP_LTE;
+	result = searchRecord(dbms, databasename, tablename, conds);
+	showRecords(dbms, fields, result);
+	cond.relOp = RELOP_GT;
+	result = searchRecord(dbms, databasename, tablename, conds);
+	showRecords(dbms, fields, result);
+	cond.relOp = RELOP_GTE;
+	result = searchRecord(dbms, databasename, tablename, conds);
 	showRecords(dbms, fields, result);
 }
 

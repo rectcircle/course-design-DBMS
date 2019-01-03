@@ -158,6 +158,60 @@ List *getFieldDefinitions(SimpleDatabase *dbms, const char *databasename, const 
 	return fields;
 }
 
+FieldDefinition* getPrimaryKey(List* fields){
+	ListNode* node = fields->head;
+	while (node != NULL) {
+		FieldDefinition *field = (FieldDefinition *)node->value;
+		if(field->flag == FIELD_FLAG_PRIMARY_KEY){
+			return field;
+		}
+		node = node->next;
+	}
+	return NULL;
+}
+
+static FieldDefinition* getFieldByName(List* fields, const char* name){
+	ListNode* node = fields->head;
+	while (node != NULL) {
+		FieldDefinition *field = (FieldDefinition *)node->value;
+		if(strcmp(field->name, name)==0){
+			return field;
+		}
+		node = node->next;
+	}
+	return NULL;
+}
+
+static Array* dumpValue(FieldDefinition *field, void *value){
+	Array* data = malloc(sizeof(Array));
+	if(field->type==FIELD_TYPE_STRING){
+		data->length = strlen((char*)value);
+		if(data->length>field->length){
+			printf("%s 字段的值长度大于字段定义的长度\n", field->name);
+			return NULL;
+		}
+		newAndCopyByteArray((uint8**)&data->array, (uint8*)value, data->length);
+	} else {
+		data->length = field->length;
+		if (field->length==1){
+			newAndCopyByteArray((uint8 **)&data->array, (uint8*)value, data->length);
+		} else if(field->length==2){
+			uint16 hostNumber = *(uint16 *)value;
+			uint16 networkNumber = htons(hostNumber);
+			newAndCopyByteArray((uint8 **)&data->array, (uint8*)&networkNumber, data->length);
+		} else if(field->length==4){
+			uint32 hostNumber = *(uint32 *)value;
+			uint32 networkNumber = htonl(hostNumber);
+			newAndCopyByteArray((uint8 **)&data->array, (uint8 *)&networkNumber, data->length);
+		} else if (field->length == 8) {
+			uint64 hostNumber = *(uint64 *)value;
+			uint64 networkNumber = htonll(hostNumber);
+			newAndCopyByteArray((uint8 **)&data->array, (uint8 *)&networkNumber, data->length);
+		}
+	}
+	return data;
+}
+
 //检查数据是否合法
 //将List<void*> -> List<Array{length, bytes}>, 涉及字节序转换 
 static List *checkAndDumpValues(List* fields, List* values){
@@ -173,32 +227,7 @@ static List *checkAndDumpValues(List* fields, List* values){
 	while (node1 != NULL) {
 		FieldDefinition *field = (FieldDefinition*)node1->value;
 		void *value = node2->value;
-		Array* data = malloc(sizeof(Array));
-		if(field->type==FIELD_TYPE_STRING){
-			data->length = strlen((char*)value);
-			if(data->length>field->length){
-				printf("%s 字段的值长度大于字段定义的长度\n", field->name);
-				return NULL;
-			}
-			newAndCopyByteArray((uint8**)&data->array, (uint8*)value, data->length);
-		} else {
-			data->length = field->length;
-			if (field->length==1){
-				newAndCopyByteArray((uint8 **)&data->array, (uint8*)value, data->length);
-			} else if(field->length==2){
-				uint16 hostNumber = *(uint16 *)value;
-				uint16 networkNumber = htons(hostNumber);
-				newAndCopyByteArray((uint8 **)&data->array, (uint8*)&networkNumber, data->length);
-			} else if(field->length==4){
-				uint32 hostNumber = *(uint32 *)value;
-				uint32 networkNumber = htonl(hostNumber);
-				newAndCopyByteArray((uint8 **)&data->array, (uint8 *)&networkNumber, data->length);
-			} else if (field->length == 8) {
-				uint64 hostNumber = *(uint64 *)value;
-				uint64 networkNumber = htonll(hostNumber);
-				newAndCopyByteArray((uint8 **)&data->array, (uint8 *)&networkNumber, data->length);
-			}
-		}
+		Array* data = dumpValue(field, value);
 		addList(result, data);
 		node1 = node1->next;
 		node2 = node2->next;
@@ -340,9 +369,156 @@ static List* parseRecord(List* fields, Array* hashResult){
 	return result;
 }
 
+static int comparePrimaryKey(void *a, void *b, void *args){
+	FieldDefinition *primaryKeyField = (FieldDefinition *)args;
+	return byteArrayCompare(primaryKeyField->length, a, b);
+}
+
+/**
+ * 解析条件, 并查询索引
+ * @return List<void* 主键> 
+ * 	   NULL 表示查询全部
+ *     len() == 0 表示没有查询集为NULL;
+ */
+static List* parseConditions(SimpleDatabase *dbms, const char *databasename, const char *tablename, List *conditions, FieldDefinition *primaryKeyField ){
+	//内存泄露
+	List *fields = getFieldDefinitions(dbms, databasename, tablename);
+	List *result = makeList();
+	ListNode *node = conditions->head;
+	while (node != NULL) {
+		QueryCondition *cond = (QueryCondition *)node->value;
+		ListNode *node1 = fields->head;
+		FieldDefinition* targetField = NULL;
+		while (node1 != NULL) {
+			FieldDefinition *field = (FieldDefinition *)node1->value;
+			if(strcmp(cond->name, field->name)==0){
+				targetField = field;
+				break;
+			}
+			node1 = node1->next;
+		}
+		if(targetField->flag == FIELD_FLAG_NORMAL){
+			freeList(result);
+			return NULL;
+		} else {
+			char* indexfilename = genIndexfilename(databasename, tablename, targetField->name);
+			IndexEngine* indexEngine = (IndexEngine*) getHashMap(dbms->indexMap, strlen(indexfilename), (uint8*)indexfilename);
+			Array* key = dumpValue(targetField, cond->value);
+			List *now = searchConditionIndexEngine(indexEngine, key->array, cond->relOp);
+			addListToList(result, now);
+		}
+		node = node->next;
+	}
+	distinctList(result, comparePrimaryKey, primaryKeyField);
+	return result;
+}
+
+static List *queryHashEngineByPrimaryList(HashEngine* engine, FieldDefinition *primaryKeyField, List *primaryKeyList){
+	List* result = makeList();
+	ListNode *node = primaryKeyList->head;
+	while (node != NULL) {
+		void* key = node->value;
+		Array value = getHashEngine(engine, primaryKeyField->length, key);
+		Array* array = malloc(sizeof(Array));
+		array->length = value.length;
+		newAndCopyByteArray(&array->array, value.array, array->length);
+		addList(result, array);
+		node = node->next;
+	}
+	return result;
+}
+
+static int conditionTest(void* a, void* b, QueryCondition* cond ,FieldDefinition* field){
+	int result = 0;
+	if (field->type == FIELD_TYPE_STRING){
+		result = strcmp((char *)a, (char *)b);
+	} else if(field->type == FIELD_TYPE_UINT){
+		if(field->length==1){
+			result = (*((uint8*) a)) - (*((uint8*) b));
+		} else if(field->length==2){
+			result = (*((uint16*) a)) - (*((uint16*) b));
+		} else if(field->length==4){
+			result = (*((uint32*) a)) - (*((uint32*) b));
+		} else if(field->length==8){
+			result = (*((uint32*) a)) - (*((uint32*) b));
+		}
+	} else if(field->type == FIELD_TYPE_INT){
+		if(field->length==1){
+			result = (*((int8*) a)) - (*((int8*) b));
+		} else if(field->length==2){
+			result = (*((int16*) a)) - (*((int16*) b));
+		} else if(field->length==4){
+			result = (*((int32*) a)) - (*((int32*) b));
+		} else if(field->length==8){
+			result = (*((int32*) a)) - (*((int32*) b));
+		}
+	}
+	if(cond->relOp == RELOP_EQ){
+		return result == 0;
+	} else if (cond->relOp == RELOP_NEQ){
+		return result != 0;
+	} else if (cond->relOp == RELOP_LT){
+		return result < 0;
+	} else if (cond->relOp == RELOP_LTE){
+		return result <= 0;
+	} else if (cond->relOp == RELOP_GT){
+		return result >= 0;
+	} else if (cond->relOp == RELOP_GTE){
+		return result != 0;
+	} else {
+		return 0;
+	}
+}
+
+static void* getRecordValueByName(List* record, List* fields, const char* name){
+	ListNode *node = fields->head;
+	ListNode *node1 = record->head;
+	while (node != NULL) {
+		FieldDefinition *field = (FieldDefinition *)node->value;
+		if(strcmp(field->name, name)==0){
+			return node1->value;
+		}
+		node = node->next;
+		node1 = node1->next;
+	}
+	return NULL;
+}
+
+static List* filterResult(List* originResult, List *conditions, List* fields){
+	//TODO 内存泄露
+	if(conditions==NULL){
+		return originResult;
+	}
+	List* result = makeList();
+	ListNode *node = originResult->head;
+	while (node != NULL) {
+		List *record = (List *)node->value;
+		ListNode *node1 = conditions->head;
+		int flag = 1;
+		while(node1 != NULL){
+			QueryCondition* cond = node1->value;
+			FieldDefinition* field = getFieldByName(fields, cond->name);
+			void* value = getRecordValueByName(record, fields, cond->name);
+			if(!conditionTest(value, cond->value, cond, field)){
+				flag = 0;
+				break;
+			}
+			node1 = node1->next;
+		}
+		if(flag){
+			addList(result, record);
+		} else {
+			// free(value);
+		}
+		node = node->next;
+	}
+	return result;
+}
+
 List *searchRecord(SimpleDatabase *dbms, const char *databasename, const char *tablename, List *conditions){
 	//TODO 内存泄露
 	List *fields = getFieldDefinitions(dbms, databasename, tablename);
+	FieldDefinition* primaryKeyField =  getPrimaryKey(fields);
 	if (fields == NULL){
 		return NULL;
 	}
@@ -357,8 +533,16 @@ List *searchRecord(SimpleDatabase *dbms, const char *databasename, const char *t
 		// 解析条件查询...
 		// 查询索引
 		// 循环查询Hash引擎
+		List *primaryKeyList = parseConditions(dbms, databasename, tablename, conditions, primaryKeyField);
+		if (primaryKeyList==NULL){
+			hashRecords = getAllHashEngine(hashEngine);
+		} else if(primaryKeyList->length==0) {
+			// 没有主键被选中
+			return makeList();
+		} else {
+			hashRecords = queryHashEngineByPrimaryList(hashEngine, primaryKeyField, primaryKeyList);
+		}
 	}
-
 	if(hashRecords==NULL){
 		return NULL;
 	}
@@ -371,5 +555,7 @@ List *searchRecord(SimpleDatabase *dbms, const char *databasename, const char *t
 		addList(result, record);
 		node = node->next;
 	}
+	// 过滤查询结果
+	filterResult(result, conditions, fields);
 	return result;
 }

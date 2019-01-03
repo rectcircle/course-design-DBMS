@@ -152,6 +152,16 @@ void addList(List* list, void* value);
 void addListToList(List* dest, List* src);
 
 /**
+ * 链表去重
+ * 
+ * @param dest 被插入的链表
+ * @param dest int (*compare)(void* a, void *b, void* args) 比较函数 返回0表示相同
+ * @param args 闭包参数
+ * @return 被剔除的元素列表, 需要用户进行内存释放
+ */
+List* distinctList(List* dest, int (*compare)(void* a, void *b, void* args), void*args);
+
+/**
  * 删除链表的第一个元素
  * @param list 一个链表
  * @return 返回value值

@@ -13,7 +13,7 @@
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
-			"externalConsole": true,
+			"externalConsole": false,
 			"preLaunchTask": "make-test",
 			"MIMode": "gdb",
 			"setupCommands": [
@@ -33,7 +33,7 @@
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
-			"externalConsole": true,
+			"externalConsole": false,
 			"preLaunchTask": "make-test",
 			"MIMode": "gdb",
 			"setupCommands": [{
@@ -51,7 +51,7 @@
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
-			"externalConsole": true,
+			"externalConsole": false,
 			"preLaunchTask": "make-test",
 			"MIMode": "gdb",
 			"setupCommands": [
@@ -71,7 +71,7 @@
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
-			"externalConsole": true,
+			"externalConsole": false,
 			"preLaunchTask": "make-test",
 			"MIMode": "gdb",
 			"setupCommands": [{
@@ -89,7 +89,7 @@
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
-			"externalConsole": true,
+			"externalConsole": false,
 			"preLaunchTask": "make-test",
 			"MIMode": "gdb",
 			"setupCommands": [{
@@ -107,7 +107,7 @@
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
-			"externalConsole": true,
+			"externalConsole": false,
 			"preLaunchTask": "make-test",
 			"MIMode": "gdb",
 			"setupCommands": [{
@@ -125,7 +125,7 @@
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
-			"externalConsole": true,
+			"externalConsole": false,
 			"preLaunchTask": "make-test",
 			"MIMode": "gdb",
 			"setupCommands": [{

@@ -108,9 +108,8 @@ void clearList(List *list){
 	list->length = 0;
 }
 
-void addList(List *list, void *value){
-	ListNode* q = (ListNode *)calloc(1, sizeof(ListNode));
-	q->value = value;
+static void addNodeToList(List* list, ListNode* q){
+
 	if(list->head ==NULL){
 		list->head = q;
 		list->tail = q;
@@ -119,6 +118,12 @@ void addList(List *list, void *value){
 		list->tail = q;
 	}
 	list->length++;
+}
+
+void addList(List *list, void *value){
+	ListNode *q = (ListNode *)calloc(1, sizeof(ListNode));
+	q->value = value;
+	addNodeToList(list, q);
 }
 
 void addListToList(List *dest, List *src){
@@ -140,6 +145,37 @@ void addListToList(List *dest, List *src){
 	}
 	src->head = src->tail = NULL;
 	src->length = 0;
+}
+
+List* distinctList(List *dest, int (*compare)(void *a, void *b, void *args), void *args){
+	if(dest==NULL || dest->length<=1){
+		return makeList();
+	}
+	ListNode* targetTail = dest->head;
+	ListNode* origin = dest->head->next;
+	List* rubbish = makeList();
+	while(origin!=NULL){
+		ListNode *p = dest->head;
+		int flag = 0;
+		while (p!=origin){
+			if(compare(p->value, origin->value, args)==0){
+				//发现重复
+				flag = 1;
+				addNodeToList(rubbish, p);
+				origin = origin->next;
+				break;
+			}
+			p = p->next;
+		}
+		if(flag==0){
+			//没有重复
+			targetTail->next = origin;
+			targetTail = origin;
+			origin = origin->next;
+		}
+	}
+	targetTail->next = NULL;
+	dest->length -= rubbish->length;
 }
 
 void *removeHeadList(List *list){

@@ -262,6 +262,22 @@ typedef struct IndexTreeNode
 List *searchIndexEngine(IndexEngine *engine, uint8 *key);
 
 /**
+ * 从索引引擎中查找 key relOp ${key} 的值
+ * 如 key >= 1
+ * @param engine IndexEngine
+ * @param key 要查找的key
+ * @return {uint8*} 带长度的数组类型
+ */
+List *searchConditionIndexEngine(IndexEngine *engine, uint8 *key, uint8 relOp);
+
+/**
+ * 从索引引擎中查找全部记录
+ * @param engine IndexEngine
+ * @return {uint8*} 带长度的数组类型
+ */
+List *searchAllIndexEngine(IndexEngine *engine, uint8 *key);
+
+/**
  * 向BTree添加添加一条记录
  * 注意：不会进行重复判断，直接插入
  * 若想保证KV严格不重复（同一对KV在树中唯一），请先使用update，若返回0再进行插入

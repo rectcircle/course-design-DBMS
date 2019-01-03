@@ -1102,6 +1102,136 @@ private List* getLeafNodeValues(IndexEngine *engine, uint8 *key, IndexTreeNode* 
 	return result;
 }
 
+static List* getLeafNodeValueByLTOrGT(IndexEngine *engine, uint64 pageId, int32 idx, uint8 relOp){
+	List *result = makeList();
+	IndexTreeNode* leaf = getTreeNodeByPageId(engine, pageId, NODE_TYPE_LEAF);
+	if(leaf==NULL){
+		return result;
+	}
+	IndexTreeMeta *treeMeta = &engine->treeMeta;
+	uint8 *value = NULL;
+	do {
+		if(relOp==RELOP_LT){ // key < ${key}
+			for (int i = idx; i >= 0; i--) {
+				value = (uint8 *)malloc(treeMeta->valueLen);
+				memcpy(value, leaf->values[i], treeMeta->valueLen);
+				addList(result, (void *)value);
+			}
+			pageId = leaf->prev;
+		} else if(relOp==RELOP_GT) {
+			for (int i = idx; i < leaf->size; i++) {
+				value = (uint8 *)malloc(treeMeta->valueLen);
+				memcpy(value, leaf->values[i], treeMeta->valueLen);
+				addList(result, (void *)value);
+			}
+			pageId = leaf->next;
+		}
+		if(leaf = getTreeNodeByPageId(engine, pageId, NODE_TYPE_LEAF) == NULL){
+			break;
+		}
+		if(relOp==RELOP_LT){ // key < ${key}
+			idx = leaf->size-1;
+		} else if(relOp==RELOP_GT) {
+			idx = 0;
+		}
+	} while (1);
+	return result;
+}
+
+static List* getLeafNodeValueByLT(IndexEngine *engine, uint64 pageId, int32 idx){
+	return getLeafNodeValueByLTOrGT(engine, pageId, idx, RELOP_LT);
+}
+
+static List* getLeafNodeValueByGT(IndexEngine *engine, uint64 pageId, int32 idx){
+	return getLeafNodeValueByLTOrGT(engine, pageId, idx, RELOP_GT);
+}
+
+private List* getLeafNodeValuesByCondition(IndexEngine *engine, uint8 *key, uint8 relOp, IndexTreeNode* leaf){
+	List *result = makeList();
+	IndexTreeMeta* treeMeta = &engine->treeMeta;
+	int32 idx=-1;
+	int32 idxRight = -1;
+	uint64 pageIdRight = -1;
+	int32 idxLeft = -1;
+	uint64 pageIdLeft = -1;
+	uint8 *value = NULL;
+	do {
+		idx = binarySearchNode(leaf, key, treeMeta->keyLen);
+		// 设置right起始
+		if (idx == -1){
+			idxRight = 0;
+			pageIdRight = leaf->pageId;
+		}
+		// 设置left起始
+		if(idxLeft==-1){
+			if(idx==-1){
+				idxLeft = -1;
+			} else {
+				if(0 == byteArrayCompare(treeMeta->keyLen, leaf->keys[idx], key)){
+					idxLeft = idx-1;
+				} else {
+					idxLeft = idx;
+				}
+			}
+			if(idxLeft==-1){
+				IndexTreeNode* left = getTreeNodeByPageId(engine, leaf->prev, NODE_TYPE_LEAF);
+				idxLeft = left->size-1;
+				pageIdLeft = left->pageId;
+			} else {
+				pageIdLeft = leaf->pageId;
+			}
+		}
+		if(idx==-1){
+			break;
+		}
+		if(0==byteArrayCompare(treeMeta->keyLen, leaf->keys[idx] , key)){
+			//如果 idx 等于 key
+			for (int i = idx; i < leaf->size; i++){
+				if(i==idx || 0==byteArrayCompare(treeMeta->keyLen, leaf->keys[i] , key)){
+					if(relOp==RELOP_EQ || relOp==RELOP_GTE || relOp==RELOP_LTE){
+						value = (uint8 *)malloc(treeMeta->valueLen);
+						memcpy(value, leaf->values[i], treeMeta->valueLen);
+						addList(result, (void*)value);
+					}
+				} else {
+					idxRight = i;
+					pageIdRight = leaf->pageId;
+					break;
+				}
+			}
+		} else {
+			// 如果 idx 不等于 key 说明 idx < ley 则 找不到
+			idxRight = idx+1;
+			if(idxRight == leaf->size){
+				IndexTreeNode *right = getTreeNodeByPageId(engine, leaf->next, NODE_TYPE_LEAF);
+				idxRight = 0;
+			} else {
+				pageIdRight = leaf->pageId;
+			}
+			break;
+		}
+	} while ((leaf=getTreeNodeByPageId(engine, leaf->next, NODE_TYPE_LEAF))!=NULL);
+	if (relOp == RELOP_LT || relOp == RELOP_LTE){
+		List* leftList = getLeafNodeValueByLT(engine, pageIdLeft, idxLeft);
+		addListToList(leftList, result);
+		freeList(result);
+		result = leftList;
+	} else if(relOp == RELOP_GT || relOp == RELOP_GTE){
+		List* rightList = getLeafNodeValueByGT(engine, pageIdRight, idxRight);
+		addListToList(result, rightList);
+		freeList(rightList);
+	} else if(relOp == RELOP_NEQ) {
+		List *leftList = getLeafNodeValueByLT(engine, pageIdLeft, idxLeft);
+		List *rightList = getLeafNodeValueByGT(engine, pageIdRight, idxRight);
+		addListToList(leftList, result);
+		addListToList(leftList, rightList);
+		free(result);
+		free(rightList);
+		result = leftList;
+	}
+	return result;
+}
+
 /**
  * 将现有节点分裂成两个节点，返回新创建的节点，平均分配
  */
@@ -1380,6 +1510,39 @@ List *searchIndexEngine(IndexEngine *engine, uint8 *key){
 	}
 	node = getTreeNodeByPageId(engine, pageId, NODE_TYPE_LEAF);
 	return getLeafNodeValues(engine, key, node);
+}
+
+List *searchConditionIndexEngine(IndexEngine *engine, uint8 *key, uint8 relOp){
+	IndexTreeMeta* treeMeta = &engine->treeMeta;
+	IndexTreeNode *node = NULL;
+	uint64 pageId = treeMeta->root;
+	int32 index = 0;
+	//一直查找到叶子节点
+	for(int32 level = 1; level<treeMeta->depth; level++){
+		node = getTreeNodeByPageId(engine, pageId, NODE_TYPE_LINK);
+		index = binarySearchNode(node, key, treeMeta->keyLen);
+		if(index<0){
+			return makeList();
+		}
+		pageId = node->children[index];
+	}
+	node = getTreeNodeByPageId(engine, pageId, NODE_TYPE_LEAF);
+	return getLeafNodeValuesByCondition(engine, key, relOp, node);
+}
+
+List *searchAllIndexEngine(IndexEngine *engine, uint8 *key){
+	uint64 pageId = engine->treeMeta.sqt;
+	List* result = makeList();
+	while(pageId!=0){
+		IndexTreeNode *node = getTreeNodeByPageId(engine, pageId, NODE_TYPE_LEAF);
+		for(int i=0; i<node->size; i++){
+			uint8 *value = (uint8 *)malloc(engine->treeMeta.valueLen);
+			memcpy(value, node->values[i], engine->treeMeta.valueLen);
+			addList(result, (void *)value);
+		}
+		pageId = node->next;
+	}
+	return result;
 }
 
 int32 insertIndexEngine(IndexEngine *engine, uint8 *key, uint8 *value){

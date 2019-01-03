@@ -17,6 +17,7 @@
 		"time.h": "c",
 		"hashengine.h": "c",
 		"stdarg.h": "c",
-		"simpledatabase.h": "c"
+		"simpledatabase.h": "c",
+		"typeinfo": "c"
 	}
 }
