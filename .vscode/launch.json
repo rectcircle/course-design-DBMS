@@ -133,6 +133,42 @@
 				"text": "-enable-pretty-printing",
 				"ignoreFailures": true
 			}]
+		}, 
+		{
+			"name": "(gdb) Launch <test-test-test>",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/out/test/test-test",
+			"args": [],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}",
+			"environment": [],
+			"externalConsole": false,
+			"preLaunchTask": "make-test",
+			"MIMode": "gdb",
+			"setupCommands": [{
+				"description": "Enable pretty-printing for gdb",
+				"text": "-enable-pretty-printing",
+				"ignoreFailures": true
+			}]
+		}, 
+		{
+			"name": "(gdb) Launch <test-main-simpledatabase>",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/out/bin/main-simpledatabase",
+			"args": ["/tmp/dbms"],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}",
+			"environment": [],
+			"externalConsole": false,
+			"preLaunchTask": "make-main",
+			"MIMode": "gdb",
+			"setupCommands": [{
+				"description": "Enable pretty-printing for gdb",
+				"text": "-enable-pretty-printing",
+				"ignoreFailures": true
+			}]
 		}
 	]
 }

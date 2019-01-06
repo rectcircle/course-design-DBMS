@@ -17,7 +17,7 @@ OBJ_DEBUG = $(patsubst %.c,${DIR_OBJ_BEBUG}/%.o,$(notdir ${SRC}))
 
 # 编译器配置
 CC = gcc
-CFLAGS = -pthread -Wall -I${DIR_INC}
+CFLAGS = -pthread -g  -Wall -I${DIR_INC}
 CFLAGS_DEBUG = -pthread -DPROFILE_TEST -g -Wall -I${DIR_INC}
 
 #要构建的主程序名
