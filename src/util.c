@@ -176,6 +176,7 @@ List* distinctList(List *dest, int (*compare)(void *a, void *b, void *args), voi
 	}
 	targetTail->next = NULL;
 	dest->length -= rubbish->length;
+	return rubbish;
 }
 
 void *removeHeadList(List *list){

@@ -170,7 +170,7 @@ FieldDefinition* getPrimaryKey(List* fields){
 	return NULL;
 }
 
-static FieldDefinition* getFieldByName(List* fields, const char* name){
+FieldDefinition* getFieldByName(List* fields, const char* name){
 	ListNode* node = fields->head;
 	while (node != NULL) {
 		FieldDefinition *field = (FieldDefinition *)node->value;
@@ -421,7 +421,7 @@ static List *queryHashEngineByPrimaryList(HashEngine* engine, FieldDefinition *p
 		Array value = getHashEngine(engine, primaryKeyField->length, key);
 		Array* array = malloc(sizeof(Array));
 		array->length = value.length;
-		newAndCopyByteArray(&array->array, value.array, array->length);
+		newAndCopyByteArray((uint8**)&array->array, (uint8*)value.array, array->length);
 		addList(result, array);
 		node = node->next;
 	}
@@ -440,7 +440,7 @@ static int conditionTest(void* a, void* b, QueryCondition* cond ,FieldDefinition
 		} else if(field->length==4){
 			result = (*((uint32*) a)) - (*((uint32*) b));
 		} else if(field->length==8){
-			result = (*((uint32*) a)) - (*((uint32*) b));
+			result = (*((uint64*) a)) - (*((uint64*) b));
 		}
 	} else if(field->type == FIELD_TYPE_INT){
 		if(field->length==1){
@@ -450,7 +450,7 @@ static int conditionTest(void* a, void* b, QueryCondition* cond ,FieldDefinition
 		} else if(field->length==4){
 			result = (*((int32*) a)) - (*((int32*) b));
 		} else if(field->length==8){
-			result = (*((int32*) a)) - (*((int32*) b));
+			result = (*((int64*) a)) - (*((int64*) b));
 		}
 	}
 	if(cond->relOp == RELOP_EQ){
@@ -556,6 +556,5 @@ List *searchRecord(SimpleDatabase *dbms, const char *databasename, const char *t
 		node = node->next;
 	}
 	// 过滤查询结果
-	filterResult(result, conditions, fields);
-	return result;
+	return filterResult(result, conditions, fields);
 }

@@ -124,4 +124,9 @@ int insertRecord(SimpleDatabase *dbms, const char *databasename, const char *tab
  */
 List* searchRecord(SimpleDatabase *dbms, const char *databasename, const char *tablename, List *conditions);
 
+/**
+ * 根据名字查询Field定义
+ */
+FieldDefinition *getFieldByName(List *fields, const char *name);
+
 #endif

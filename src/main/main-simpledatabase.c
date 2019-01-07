@@ -44,7 +44,6 @@ void showExecuteSuccess (const char* command){
 void checkDirpath(const char *dirpath){
 	DIR *d; //声明一个句柄
 	struct dirent *file; //readdir函数的返回值就存放在这个结构体中
-	struct stat sb;
 
 	if (!(d = opendir(dirpath)))
 	{
@@ -149,7 +148,7 @@ void *printDatabaseItem(struct Entry *entry, void *args){
 	return NULL;
 }
 
-char* getWordByIndex(char *command, int index){
+char* getWordByIndex(const char *command, int index){
 	int wordIdx = -1;
 	int spaceFlag = 1;
 	int startIndex = -1;
@@ -207,7 +206,6 @@ void showDatabaseHandle(const char *command){
 	showTableStringItem(databaseNameLen, col1);
 	showTableStringItem(tableTotalLen, col2);
 	printf("\n");
-	printf(dbms->databaseMap);
 	foreachHashMap(dbms->databaseMap, printDatabaseItem, NULL);
 	printf("total: %d\n", dbms->databaseMap->size);
 }
@@ -218,7 +216,7 @@ void useDatabaseHandle(const char *command){
 		showSyntaxError(command);
 		return;
 	}
-	if(NULL==getHashMap(dbms->databaseMap, strlen(databasename), databasename)){
+	if(NULL==getHashMap(dbms->databaseMap, strlen(databasename), (uint8*)databasename)){
 		printf("error: database `%s` not exist\n", databasename);
 		return;
 	}
@@ -257,30 +255,51 @@ void showTableHandle(const char *command){
 	printf("total: %d\n", tableMap->size);
 }
 
+static int getFirstCharIndex(const char* command, char c){
+	for(int i=0; i<strlen(command); i++){
+		if(command[i]==c){
+			return i;
+		}
+	}
+	return -1;
+}
+
+static int getFirstStringIndex(const char* command, const char* sub){
+	int subLen = strlen(sub);
+	int commandLen = strlen(command);
+	for(int i=0; i<commandLen-subLen+1; i++){
+		if(strncmp(command+i, sub, subLen)==0){
+			return i;
+		}
+	}
+	return -1;
+}
+
 //获取字段定义右括号位置
 static int getFirstLeftParenthesisIndex(const char *command){
-	for(int i=0; i<strlen(command); i++){
-		if(command[i]=='('){
+	return getFirstCharIndex(command, '(');
+}
+
+static int getLastCharIndex(const char* command, char c){
+	for(int i=strlen(command)-1; i>=0; i--){
+		if(command[i]==c){
 			return i;
 		}
 	}
 	return -1;
 }
+
 
 static int getLastRightParenthesisIndex(const char *command){
-	for(int i=strlen(command)-1; i>=0; i--){
-		if(command[i]==')'){
-			return i;
-		}
-	}
-	return -1;
+	return getLastCharIndex(command, ')');
 }
 
-static List* splitFieldListString(const char* fieldListString, char splitChar){
+static List* splitByChar(const char* fieldListString, char splitChar){
 	List* fieldStringList = makeList();
 	int start = 0;
+	int originLen = strlen(fieldListString);
 	for(int i=0; i<=strlen(fieldListString); i++){
-		if(fieldListString[i] == splitChar || (i==strlen(fieldListString) && i>start)){
+		if((i!= originLen && fieldListString[i] == splitChar) || (i==strlen(fieldListString) && i>start)){
 			char * fieldString = malloc(i-start+1);
 			memcpy(fieldString, fieldListString + start, i - start);
 			fieldString[i-start] = '\0';
@@ -352,6 +371,10 @@ static FieldDefinition* parseField(const char* string){
 
 //create table article(id uint(8) primary, title string(256) index, author string(128), content string(1048576),  create_time uint(4), modify_time uint(4))
 void createTableHandle(const char *command){
+	if(nowDatabaseName==NULL){
+		printf("error: please select database by `use <database_name>` first\n");
+		return;
+	}
 	int commandLen = strlen(command);
 	int leftParenthesisIndex = getFirstLeftParenthesisIndex(command);
 	int lastRightParenthesisIndex = getLastRightParenthesisIndex(command);
@@ -369,12 +392,12 @@ void createTableHandle(const char *command){
 	char *fieldListString = malloc(lastRightParenthesisIndex - leftParenthesisIndex);
 	memcpy(fieldListString, command + leftParenthesisIndex + 1, lastRightParenthesisIndex - leftParenthesisIndex-1);
 	fieldListString[commandLen - leftParenthesisIndex-1] = '\0';
-	List *fieldStringList = splitFieldListString(fieldListString, ',');
+	List *fieldStringList = splitByChar(fieldListString, ',');
 
 	List* fieldList = makeList();
 	ListNode* node = fieldStringList->head;
 	int primarySum = 0;
-	while(node->next!=NULL){
+	while(node!=NULL){
 		char* fieldString = (char*)node->value;
 		// printf("%s\n", fieldString);
 		FieldDefinition* field = parseField(fieldString);
@@ -397,7 +420,7 @@ void createTableHandle(const char *command){
 	}
 }
 
-static void *printFieldItem(void* value, void *args){
+static void printFieldItem(void* value, void *args){
 	FieldDefinition* field = (FieldDefinition*) value;
 	printf("|");
 	showTableStringItem(15, field->name);
@@ -423,10 +446,13 @@ static void *printFieldItem(void* value, void *args){
 	}
 	showTableStringItem(15, key);
 	printf("\n");
-	return NULL;
 }
 
 void showColumnsHandle(const char *command){
+	if(nowDatabaseName==NULL){
+		printf("error: please select database by `use <database_name>` first\n");
+		return;
+	}
 	char* tablename = getWordByIndex(command, 1);
 	HashMap *tableMap = getHashMap(dbms->databaseMap, strlen(nowDatabaseName), (uint8 *)nowDatabaseName);
 	List *fields = getHashMap(tableMap, strlen(tablename), (uint8 *)tablename);
@@ -443,12 +469,293 @@ void showColumnsHandle(const char *command){
 	foreachList(fields, printFieldItem, NULL);
 }
 
-void insertTableHandle(const char *command){
+void *stringToValue(FieldDefinition *field, char *valueString){
+	if(field->type==FIELD_TYPE_STRING){
+		int leftIndex = getFirstCharIndex(valueString, '\'');
+		int rightIndex = getLastCharIndex(valueString, '\'');
 
+		int len = rightIndex - leftIndex - 1;
+		char *value = malloc(len+1);
+		value[len] = '\0';
+		memcpy(value, valueString + leftIndex+1, len);
+		return value;
+	} else if(field->type==FIELD_TYPE_UINT){
+		uint64 tmp;
+		sscanf(valueString, "%llu", &tmp);
+		if(field->length==1){
+			uint8* value = malloc(sizeof(uint8));
+			*value = tmp;
+			return value;
+		} else if(field->length==2){
+			uint16 *value = malloc(sizeof(uint16));
+			*value = tmp;
+			return value;
+		} else if(field->length==4){
+			uint32 *value = malloc(sizeof(uint32));
+			*value = tmp;
+			return value;
+		} else if(field->length==8){
+			uint64 *value = malloc(sizeof(uint64));
+			*value = tmp;
+			return value;
+		}
+	} else if(field->type==FIELD_TYPE_INT){
+		int64 tmp;
+		sscanf(valueString, "%lld", &tmp);
+		if(field->length==1){
+			int8 *value = malloc(sizeof(int8));
+			*value = tmp;
+			return value;
+		} else if(field->length==2){
+			int16 *value = malloc(sizeof(int16));
+			*value = tmp;
+			return value;
+		} else if(field->length==4){
+			int32 *value = malloc(sizeof(int32));
+			*value = tmp;
+			return value;
+		} else if(field->length==8){
+			int64 *value = malloc(sizeof(int64));
+			*value = tmp;
+			return value;
+		}
+	}
+	return NULL;
+}
+
+// insert into article values(1, 'article title', 'rectcircle', 'article content', 1546324158, 1546324158);
+void insertTableHandle(const char *command){
+	if(nowDatabaseName==NULL){
+		printf("error: please select database by `use <database_name>` first\n");
+		return;
+	}
+	char* tablename = getWordByIndex(command, 2);
+	HashMap *tableMap = getHashMap(dbms->databaseMap, strlen(nowDatabaseName), (uint8 *)nowDatabaseName);
+	List *fields = getHashMap(tableMap, strlen(tablename), (uint8 *)tablename);
+	if(fields==NULL){
+		printf("table `%s` not exist\n", tablename);
+		return;
+	}
+
+	int leftParenthesisIndex = getFirstLeftParenthesisIndex(command);
+	int rightParenthesisIndex = getLastRightParenthesisIndex(command);
+	if(leftParenthesisIndex == -1 || rightParenthesisIndex==-1){
+		showSyntaxError(command);
+		return;
+	}
+	char* valueListString = malloc(rightParenthesisIndex-leftParenthesisIndex);
+	valueListString[rightParenthesisIndex-leftParenthesisIndex] = '\0';
+	memcpy(valueListString, command + leftParenthesisIndex+1, rightParenthesisIndex - leftParenthesisIndex-1);
+	List* splitList = splitByChar(valueListString, ',');
+	if(splitList->length!=fields->length){
+		printf("error: value length must equals to colums length\n");
+	}
+	
+	List* valueList = makeList();
+
+	ListNode* node = fields->head;
+	ListNode* node1 = splitList->head;
+	while(node!=NULL){
+		FieldDefinition* field = (FieldDefinition*)node->value;
+		char* valueString = (char*)node1->value;
+		void *value = stringToValue(field, valueString);
+		if(value==NULL){
+			showSyntaxError(valueString);
+			return;
+		}
+		addList(valueList, value);
+		node = node->next;
+		node1 = node1->next;
+	}
+	if(insertRecord(dbms, nowDatabaseName, tablename, valueList)==1){
+		printf("insert into `%s` success\n", tablename);
+	}
+}
+
+
+void showRecord( List* fields, List* value, int* showLens){
+	ListNode *node = fields->head;
+	ListNode *node1 = value->head;
+	int i=0;
+	printf("|");
+	while (node != NULL) {
+		FieldDefinition *field = (FieldDefinition*) node->value;
+		void* fiedlValue = node1->value;
+		if(field->type==FIELD_TYPE_STRING){
+			//字符串类型
+			showTableStringItem(showLens[i], (char *)fiedlValue);
+		} else if(field->type==FIELD_TYPE_UINT){
+			uint64 value;
+			if(field->length==1){
+				value = *(uint8 *)fiedlValue;
+			} else if(field->length==2){
+				value = *(uint16 *)fiedlValue;
+			} else if(field->length==4){
+				value = *(uint32 *)fiedlValue;
+			} else if(field->length==8){
+				value = *(uint64 *)fiedlValue;
+			}
+			showTableUintItem(showLens[i], value);
+		} else if(field->type==FIELD_TYPE_INT){
+			int64 value;
+			if(field->length==1){
+				value = *(int8 *)fiedlValue;
+			} else if(field->length==2){
+				value = *(int16 *)fiedlValue;
+			} else if(field->length==4){
+				value = *(int32 *)fiedlValue;
+			} else if(field->length==8){
+				value = *(int64 *)fiedlValue;
+			}
+			showTableIntItem(showLens[i], value);
+		}
+		node = node->next;
+		node1 = node1->next;
+		i++;
+	}
+	printf("\n");
+}
+
+static List* splitByString(const char* origin, char* splitStr){
+	List* result = makeList();
+	int start = 0;
+	int originLen = strlen(origin);
+	int splitLen = strlen(splitStr);
+	for(int i=0; i<=originLen - splitLen+1;){
+		if((i!=originLen - splitLen+1 && strncmp(splitStr, origin+i, splitLen) == 0) || (i==originLen - splitLen+1)){
+			int len = i-start;
+			if(i==originLen - splitLen+1){
+				len = originLen - start;
+			}
+			char *value = malloc(len + 1);
+			memcpy(value, origin + start, len);
+			value[len] = '\0';
+			addList(result, value);
+			start = i+splitLen;
+			i += splitLen;
+		} else {
+			i += 1;
+		}
+	}
+	return result;
+}
+
+List* genQueryConditions(List *fields, const char *command){
+	List* result = makeList();
+	List* conditionStringList = splitByString(command, "and");
+	ListNode* node = conditionStringList->head;
+	while(node!=NULL){
+		QueryCondition *condition = malloc(sizeof(QueryCondition));
+
+		char* kv =  (char*)node->value;
+		int splitIndex = -1;
+		int splitLen = 1;
+
+		if(splitIndex==-1){
+			splitIndex = getFirstStringIndex(kv, "!=");
+			splitLen = 2;
+			condition->relOp = RELOP_NEQ;
+		}
+		if (splitIndex == -1){
+			splitIndex = getFirstStringIndex(kv, "<=");
+			splitLen = 2;
+			condition->relOp = RELOP_LTE;
+		}
+		if (splitIndex == -1){
+			splitIndex = getFirstStringIndex(kv, "<");
+			splitLen = 1;
+			condition->relOp = RELOP_LT;
+		}
+		if (splitIndex == -1){
+			splitIndex = getFirstStringIndex(kv, ">=");
+			splitLen = 2;
+			condition->relOp = RELOP_GTE;
+		}
+		if (splitIndex == -1){
+			splitIndex = getFirstStringIndex(kv, ">");
+			splitLen = 1;
+			condition->relOp = RELOP_GT;
+		}
+		if (splitIndex==-1){
+			splitIndex = getFirstCharIndex(kv, '=');
+			splitLen = 1;
+			condition->relOp = RELOP_EQ;
+		}
+		if(splitIndex==-1){
+			showSyntaxError(command);
+			return NULL;
+		}
+		kv[splitIndex] = '\0';
+		char* key = getWordByIndex(kv, 0);
+		FieldDefinition* field = getFieldByName(fields, key);
+		void *value = stringToValue(field,kv+splitIndex+splitLen);
+
+		condition->name = key;
+		condition->logOp = LOGOP_AND;
+		condition->value = value;
+		addList(result, condition);
+		node = node->next;
+	}
+	return result;
 }
 
 void selectTableHandle(const char *command){
+	if(nowDatabaseName==NULL){
+		printf("error: please select database by `use <database_name>` first\n");
+		return;
+	}
+	char* tablename = getWordByIndex(command, 3);
+	HashMap *tableMap = getHashMap(dbms->databaseMap, strlen(nowDatabaseName), (uint8 *)nowDatabaseName);
+	List *fields = getHashMap(tableMap, strlen(tablename), (uint8 *)tablename);
+	if(fields==NULL){
+		printf("table `%s` not exist\n", tablename);
+		return;
+	}
 
+	List *conds = NULL;
+	int whereIdx = getFirstStringIndex(command, "where");
+	if(whereIdx != -1){
+		conds = genQueryConditions(fields, command + whereIdx + strlen("where")+1);
+		if(conds==NULL){
+			return;
+		}
+	}
+	List* result = searchRecord(dbms, nowDatabaseName, tablename, conds);
+
+	//输出列名
+	printf("|");
+	ListNode* node = fields->head;
+	int* lenArr = malloc(sizeof(int)*fields->length);
+	int i=0;
+	while(node!=NULL){
+		FieldDefinition* field = (FieldDefinition*)node->value;
+		if(field->length<10){
+			lenArr[i] = 10;
+		} else if(field->length>=30){
+			lenArr[i] = 30;
+		} else {
+			lenArr[i] = field->length+1;
+		}
+		if(lenArr[i]<=strlen(field->name)){
+			lenArr[i] = strlen(field->name)+1;
+		}
+		showTableStringItem(lenArr[i], field->name);
+		i++;
+		node = node->next;
+	}
+	printf("\n");
+
+	node = result->head;
+	int recordLen = 0;
+	i=0;
+	while (node != NULL)
+	{
+		recordLen++;
+		List *value = (List *)node->value;
+		showRecord(fields, value, lenArr);
+		node = node->next;
+	}
+	printf("tatol: %d\n", recordLen);
 }
 
 struct CommandToHandler {
@@ -502,7 +809,7 @@ void repl(){
 	}
 }
 
-int main(int argc, char const *argv[]){
+int main(int argc, char *argv[]){
 	if(argc!=2){
 		showUsage();
 	}

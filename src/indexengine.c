@@ -1151,9 +1151,9 @@ private List* getLeafNodeValuesByCondition(IndexEngine *engine, uint8 *key, uint
 	IndexTreeMeta* treeMeta = &engine->treeMeta;
 	int32 idx=-1;
 	int32 idxRight = -1;
-	uint64 pageIdRight = -1;
+	uint64 pageIdRight = 0;
 	int32 idxLeft = -1;
-	uint64 pageIdLeft = -1;
+	uint64 pageIdLeft = 0;
 	uint8 *value = NULL;
 	do {
 		idx = binarySearchNode(leaf, key, treeMeta->keyLen);
@@ -1175,8 +1175,13 @@ private List* getLeafNodeValuesByCondition(IndexEngine *engine, uint8 *key, uint
 			}
 			if(idxLeft==-1){
 				IndexTreeNode* left = getTreeNodeByPageId(engine, leaf->prev, NODE_TYPE_LEAF);
-				idxLeft = left->size-1;
-				pageIdLeft = left->pageId;
+				if(left==NULL){
+					idxLeft = -1;
+					pageIdLeft = 0;
+				} else {
+					idxLeft = left->size-1;
+					pageIdLeft = left->pageId;
+				}
 			} else {
 				pageIdLeft = leaf->pageId;
 			}
