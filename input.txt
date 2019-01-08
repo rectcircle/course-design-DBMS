@@ -1,0 +1,16 @@
+create database test
+show databases
+use test
+show tables
+create table article(id uint(8) primary, title string(256) index, author string(128), content string(1048576),  create_time uint(4), modify_time uint(4))
+desc article
+insert into article values(1, 'article title', 'rectcircle', 'article content', 1546324158, 1546324158)
+insert into article values(2, 'article title2', 'rectcircle', 'article content', 1546324158, 1546324158)
+select * from article
+select * from article where id=1
+select * from article where id=1 and author='rectcircle'
+select * from article where id>1
+select * from article where id>=1
+select * from article where id<1
+select * from article where id!=1
+
