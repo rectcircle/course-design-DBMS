@@ -69,6 +69,8 @@ typedef struct SimpleDatabase
 	struct HashMap* databaseMap;
 	/** HashMap<表文件名, HashEngine> */
 	struct HashMap* dataMap;
+	/** HashMap<表文件名, pthread_mutex_t*> 包含一个全局锁 */
+	struct HashMap *tableMutexMap;
 	/** HashMap<索引表文件名, indexEngine> */
 	struct HashMap *indexMap;
 	/** 数据文件目录 */

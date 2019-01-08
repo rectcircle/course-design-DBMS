@@ -41,6 +41,12 @@ static char * genIndexfilename(const char*databasename, const char* tablename, c
 	return filename;
 }
 
+static pthread_mutex_t* makePthreadMutexT(){
+	pthread_mutex_t *mutex = malloc(sizeof(pthread_mutex_t));
+	pthread_mutex_init(mutex, NULL);
+	return mutex;
+}
+
 SimpleDatabase *makeSimpleDatabase(const char *dirpath){
 	SimpleDatabase* dbms = malloc(sizeof(SimpleDatabase));
 	newAndCopyByteArray((uint8**)&dbms->dirpath, (uint8*)dirpath, strlen(dirpath)+1);
@@ -50,15 +56,20 @@ SimpleDatabase *makeSimpleDatabase(const char *dirpath){
 	dbms->databaseMap = makeHashMap(hashMapSize);
 	dbms->dataMap = makeHashMap(hashMapSize);
 	dbms->indexMap = makeHashMap(hashMapSize);
+	dbms->tableMutexMap = makeHashMap(hashMapSize);
 	char *metadataPath = genMetadatapath(dirpath);
 	HashEngine* metadateHashEngine = makeHashEngine(metadataPath, metadataCacheCap, metadataHashMapCap, 1024, sizeThreshold, 1024);
 	putHashMap(dbms->dataMap, strlen(METADATA_KEY), (uint8*)METADATA_KEY,metadateHashEngine);
 
+	putHashMap(dbms->tableMutexMap, strlen(METADATA_KEY), (uint8 *)METADATA_KEY, makePthreadMutexT);
 	free(metadataPath);
 	return dbms;
 }
 
 int createDatabase(SimpleDatabase *dbms, const char *databasename){
+	pthread_mutex_t* mutex = getHashMap(dbms->tableMutexMap, strlen(METADATA_KEY), METADATA_KEY);
+	pthread_cleanup_push((void *)pthread_mutex_unlock, mutex);
+	pthread_mutex_lock(mutex);
 	int hashMapCap = 1024;
 	if(getHashMap(dbms->databaseMap, strlen(databasename), (uint8*) databasename)!=NULL){
 		printf("数据库 %s 已存在", databasename);
@@ -66,10 +77,15 @@ int createDatabase(SimpleDatabase *dbms, const char *databasename){
 	}
 	HashMap *tableMap = makeHashMap(hashMapCap);
 	putHashMap(dbms->databaseMap, strlen(databasename), (uint8*)databasename, tableMap);
+	pthread_mutex_unlock(mutex);
+	pthread_cleanup_pop(0);
 	return 1;
 }
 
 int createTable(SimpleDatabase *dbms, const char *databasename, const char *tablename, List *fields){
+	pthread_mutex_t *mutex = getHashMap(dbms->tableMutexMap, strlen(METADATA_KEY), METADATA_KEY);
+	pthread_cleanup_push((void *)pthread_mutex_unlock, mutex);
+	pthread_mutex_lock(mutex);
 	int dataHashMapCap = 1024;
 	int dataCacheCap = 1024;
 	HashMap *tableMap = (HashMap*)getHashMap(dbms->databaseMap, strlen(databasename), (uint8*)databasename);
@@ -136,8 +152,12 @@ int createTable(SimpleDatabase *dbms, const char *databasename, const char *tabl
 		free(indexFilepath);
 		node = node->next;
 	}
+
+	putHashMap(dbms->tableMutexMap, strlen(tableFilename), tableFilename, makePthreadMutexT());
 	free(tableFilename);
 	free(tableFilepath);
+	pthread_mutex_unlock(mutex);
+	pthread_cleanup_pop(0);
 	return 1;
 }
 
@@ -262,6 +282,12 @@ static Array* dumpvaluesToBuffer(int32 bufferLen, List* fields, List*dumpvalues)
 
 int insertRecord(SimpleDatabase *dbms, const char *databasename, const char *tablename, List *values){
 	//TODO 内存泄露
+	char *dataFilename = genTablefilename(databasename, tablename);
+	pthread_mutex_t *mutex = getHashMap(dbms->tableMutexMap, strlen(dataFilename), dataFilename);
+	pthread_cleanup_push((void *)pthread_mutex_unlock, mutex);
+	pthread_mutex_lock(mutex);
+	HashEngine *hashEngine = (HashEngine *)getHashMap(dbms->dataMap, strlen(dataFilename), (uint8 *)dataFilename);
+	
 	List *fields = getFieldDefinitions(dbms, databasename, tablename);
 	if (fields == NULL){
 		return 0;
@@ -317,9 +343,9 @@ int insertRecord(SimpleDatabase *dbms, const char *databasename, const char *tab
 	}
 	// 将数据 写入
 	Array * buffer = dumpvaluesToBuffer(len, fields, dumpvalues);
-	char *dataFilename = genTablefilename(databasename, tablename);
-	HashEngine *hashEngine = (HashEngine *)getHashMap(dbms->dataMap, strlen(dataFilename), (uint8*)dataFilename);
 	putHashEngine(hashEngine, primaryKeyField->length, primaryKeyValue, buffer->length, buffer->array);
+	pthread_mutex_unlock(mutex);
+	pthread_cleanup_pop(0);
 	return 1;
 }
 
@@ -523,6 +549,11 @@ List *searchRecord(SimpleDatabase *dbms, const char *databasename, const char *t
 		return NULL;
 	}
 	char *dataFilename = genTablefilename(databasename, tablename);
+
+	pthread_mutex_t *mutex = getHashMap(dbms->tableMutexMap, strlen(dataFilename), (uint8*)dataFilename);
+	pthread_cleanup_push((void *)pthread_mutex_unlock, mutex);
+	pthread_mutex_lock(mutex);
+
 	HashEngine *hashEngine = (HashEngine *)getHashMap(dbms->dataMap, strlen(dataFilename), (uint8 *)dataFilename);
 	//从Hash引擎拿到的数据
 	// List<Array*>
@@ -557,4 +588,6 @@ List *searchRecord(SimpleDatabase *dbms, const char *databasename, const char *t
 	}
 	// 过滤查询结果
 	return filterResult(result, conditions, fields);
+	pthread_mutex_unlock(mutex);
+	pthread_cleanup_pop(0);
 }
