@@ -9,6 +9,7 @@
  ******************************************************************************/
 #include <malloc.h>
 #include <string.h>
+#include <pthread.h>
 
 #include "simpledatabase.h"
 
@@ -67,30 +68,29 @@ SimpleDatabase *makeSimpleDatabase(const char *dirpath){
 }
 
 int createDatabase(SimpleDatabase *dbms, const char *databasename){
-	pthread_mutex_t* mutex = getHashMap(dbms->tableMutexMap, strlen(METADATA_KEY), METADATA_KEY);
-	pthread_cleanup_push((void *)pthread_mutex_unlock, mutex);
+	pthread_mutex_t* mutex = getHashMap(dbms->tableMutexMap, strlen(METADATA_KEY), (uint8*)METADATA_KEY);
 	pthread_mutex_lock(mutex);
 	int hashMapCap = 1024;
 	if(getHashMap(dbms->databaseMap, strlen(databasename), (uint8*) databasename)!=NULL){
 		printf("数据库 %s 已存在", databasename);
+		pthread_mutex_unlock(mutex);
 		return 0;
 	}
 	HashMap *tableMap = makeHashMap(hashMapCap);
 	putHashMap(dbms->databaseMap, strlen(databasename), (uint8*)databasename, tableMap);
 	pthread_mutex_unlock(mutex);
-	pthread_cleanup_pop(0);
 	return 1;
 }
 
 int createTable(SimpleDatabase *dbms, const char *databasename, const char *tablename, List *fields){
-	pthread_mutex_t *mutex = getHashMap(dbms->tableMutexMap, strlen(METADATA_KEY), METADATA_KEY);
-	pthread_cleanup_push((void *)pthread_mutex_unlock, mutex);
+	pthread_mutex_t *mutex = getHashMap(dbms->tableMutexMap, strlen(METADATA_KEY), (uint8*)METADATA_KEY);
 	pthread_mutex_lock(mutex);
 	int dataHashMapCap = 1024;
 	int dataCacheCap = 1024;
 	HashMap *tableMap = (HashMap*)getHashMap(dbms->databaseMap, strlen(databasename), (uint8*)databasename);
 	if(tableMap==NULL){
 		printf("请先创建数据库\n");
+		pthread_mutex_unlock(mutex);
 		return 0;
 	}
 	//检测每个字段是否合法, 并找到主键
@@ -105,6 +105,7 @@ int createTable(SimpleDatabase *dbms, const char *databasename, const char *tabl
 		if(field->type!=FIELD_TYPE_STRING){
 			if (field->length != 1 && field->length != 2 && field->length != 4 && field->length != 8){
 				printf("数字类型长度可选1,2,4,8字节");
+				pthread_mutex_unlock(mutex);
 				return 0;
 			}
 		}
@@ -112,6 +113,7 @@ int createTable(SimpleDatabase *dbms, const char *databasename, const char *tabl
 	}
 	if(primaryKeyField==NULL){
 		printf("表必须包含主键\n");
+		pthread_mutex_unlock(mutex);
 		return 0;
 	}
 	//放到Metadata中
@@ -153,11 +155,10 @@ int createTable(SimpleDatabase *dbms, const char *databasename, const char *tabl
 		node = node->next;
 	}
 
-	putHashMap(dbms->tableMutexMap, strlen(tableFilename), tableFilename, makePthreadMutexT());
+	putHashMap(dbms->tableMutexMap, strlen(tableFilename), (uint8*)tableFilename, makePthreadMutexT());
 	free(tableFilename);
 	free(tableFilepath);
 	pthread_mutex_unlock(mutex);
-	pthread_cleanup_pop(0);
 	return 1;
 }
 
@@ -283,13 +284,13 @@ static Array* dumpvaluesToBuffer(int32 bufferLen, List* fields, List*dumpvalues)
 int insertRecord(SimpleDatabase *dbms, const char *databasename, const char *tablename, List *values){
 	//TODO 内存泄露
 	char *dataFilename = genTablefilename(databasename, tablename);
-	pthread_mutex_t *mutex = getHashMap(dbms->tableMutexMap, strlen(dataFilename), dataFilename);
-	pthread_cleanup_push((void *)pthread_mutex_unlock, mutex);
+	pthread_mutex_t *mutex = getHashMap(dbms->tableMutexMap, strlen(dataFilename), (uint8*)dataFilename);
 	pthread_mutex_lock(mutex);
 	HashEngine *hashEngine = (HashEngine *)getHashMap(dbms->dataMap, strlen(dataFilename), (uint8 *)dataFilename);
 	
 	List *fields = getFieldDefinitions(dbms, databasename, tablename);
 	if (fields == NULL){
+		pthread_mutex_unlock(mutex);
 		return 0;
 	}
 	// List<Array{length, bytes}>
@@ -331,6 +332,7 @@ int insertRecord(SimpleDatabase *dbms, const char *databasename, const char *tab
 			IndexEngine *indexEngine = (IndexEngine *) getHashMap(dbms->indexMap, strlen(indexFilename), (uint8*)indexFilename);
 			if (indexEngine==NULL){
 				printf("索引文件本应该存在, 但是缺失");
+				pthread_mutex_unlock(mutex);
 				return 0;
 			}
 			char *keyWith0 = calloc(1, field->length); // 创建一个拷贝不足的补零, 用于索引存储, 主要防止字符串问题
@@ -345,7 +347,6 @@ int insertRecord(SimpleDatabase *dbms, const char *databasename, const char *tab
 	Array * buffer = dumpvaluesToBuffer(len, fields, dumpvalues);
 	putHashEngine(hashEngine, primaryKeyField->length, primaryKeyValue, buffer->length, buffer->array);
 	pthread_mutex_unlock(mutex);
-	pthread_cleanup_pop(0);
 	return 1;
 }
 
@@ -551,9 +552,7 @@ List *searchRecord(SimpleDatabase *dbms, const char *databasename, const char *t
 	char *dataFilename = genTablefilename(databasename, tablename);
 
 	pthread_mutex_t *mutex = getHashMap(dbms->tableMutexMap, strlen(dataFilename), (uint8*)dataFilename);
-	pthread_cleanup_push((void *)pthread_mutex_unlock, mutex);
 	pthread_mutex_lock(mutex);
-
 	HashEngine *hashEngine = (HashEngine *)getHashMap(dbms->dataMap, strlen(dataFilename), (uint8 *)dataFilename);
 	//从Hash引擎拿到的数据
 	// List<Array*>
@@ -569,12 +568,14 @@ List *searchRecord(SimpleDatabase *dbms, const char *databasename, const char *t
 			hashRecords = getAllHashEngine(hashEngine);
 		} else if(primaryKeyList->length==0) {
 			// 没有主键被选中
+			pthread_mutex_unlock(mutex);
 			return makeList();
 		} else {
 			hashRecords = queryHashEngineByPrimaryList(hashEngine, primaryKeyField, primaryKeyList);
 		}
 	}
 	if(hashRecords==NULL){
+		pthread_mutex_unlock(mutex);
 		return NULL;
 	}
 
@@ -587,7 +588,7 @@ List *searchRecord(SimpleDatabase *dbms, const char *databasename, const char *t
 		node = node->next;
 	}
 	// 过滤查询结果
-	return filterResult(result, conditions, fields);
+	List* answer = filterResult(result, conditions, fields);
 	pthread_mutex_unlock(mutex);
-	pthread_cleanup_pop(0);
+	return answer;
 }

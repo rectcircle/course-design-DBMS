@@ -1126,7 +1126,7 @@ static List* getLeafNodeValueByLTOrGT(IndexEngine *engine, uint64 pageId, int32 
 			}
 			pageId = leaf->next;
 		}
-		if(leaf = getTreeNodeByPageId(engine, pageId, NODE_TYPE_LEAF) == NULL){
+		if((leaf = getTreeNodeByPageId(engine, pageId, NODE_TYPE_LEAF)) == NULL){
 			break;
 		}
 		if(relOp==RELOP_LT){ // key < ${key}
@@ -1209,6 +1209,7 @@ private List* getLeafNodeValuesByCondition(IndexEngine *engine, uint8 *key, uint
 			idxRight = idx+1;
 			if(idxRight == leaf->size){
 				IndexTreeNode *right = getTreeNodeByPageId(engine, leaf->next, NODE_TYPE_LEAF);
+				pageIdRight = right->pageId;
 				idxRight = 0;
 			} else {
 				pageIdRight = leaf->pageId;
